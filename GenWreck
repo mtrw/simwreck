@@ -86,7 +86,7 @@ ARGUMENTS:	[min,max] (default)	Desription
         (($maxlength =~ /^\d*\.?\d*$/) && ($maxlength > $minlength)) || die "\nERROR: Right end of beta distribution parameter (-M) must be a number greater than zero and greater than left end (-m)\n";
     if ($opts{'p'}) { $nPu_vs_nPy = $opts{'p'}} else {$nPu_vs_nPy = 3; $paramchangeflag = 1 } ;  #purine/pyramidine break ratio. e.g. 2 means twice so likely to break at a purine
         (($nPu_vs_nPy =~ /^\d*\.?\d*$/) && ($nPu_vs_nPy >= 0 )) || die "\nERROR: Purine:Pyrimide break ratio parameter (-p) must be a number greater than zero\n";
-    if ($opts{'d'}) { $damweight = $opts{'d'}} else {$damweight = .3; $paramchangeflag = 1 } ;  #damage weight. pribability of end nucleotide being deaminated
+    if (defined $opts{'d'}) { $damweight = $opts{'d'}} else {$damweight = .3; $paramchangeflag = 1 } ;  #damage weight. pribability of end nucleotide being deaminated
         (($damweight =~ /^\d*\.?\d*$/) && ($damweight >= 0 ) && ($damweight <= 1 )) || die "\nERROR: Damage weight parameter (-d) must be a number from zero to one\n";
     if ($opts{'D'}) { $damdecay = $opts{'D'}} else {$damdecay = .5; $paramchangeflag = 1 } ;  #damage weight. pribability of end nucleotide being deaminated
         (($damdecay =~ /^\d*\.?\d*$/) && ($damdecay >= 0 )) || die "\nERROR: Damage weight parameter (-d) must be a number from zero to one\n";
@@ -200,7 +200,9 @@ ARGUMENTS:	[min,max] (default)	Desription
 		    my $length = get_length($nPu_vs_nPy , $shape , $scale , $minlength , $maxlength , @seqarray[($i+$minlength) .. ($i+$maxlength)]);
 		    $VV && print STDERR "Length: $length\n";
 		    ++$nreads;		    
-		    my $frag_ = Bio::Seq->new(-seq => damage(substr($seq,$i+1,$length),$damweight,$damdecay) , -display_id => $seq_->display_id."_SimAnc_".$nreads);
+		    my $id;
+		    ($seq_->display_id) ? ($id = $seq_->display_id) : ($id = 'NO_ID');
+		    my $frag_ = Bio::Seq->new(-seq => damage(substr($seq,$i+1,$length),$damweight,$damdecay) , -display_id => $id."_SimAnc_".$nreads);
 		    $seqO_->write_seq($frag_);
 		    $VV && print STDERR "Reads so far: $nreads\n";
 		}
@@ -223,8 +225,10 @@ ARGUMENTS:	[min,max] (default)	Desription
 		    
 		    my $length = get_length($nPu_vs_nPy , $shape , $scale , $minlength , $maxlength , @seqarray[($i+$minlength) .. ($i+$maxlength)]);
 		    $VV && print STDERR "Length: $length\n";
-		    ++$nreads;			    
-		    my $frag_ = Bio::Seq->new(-seq => damage(substr($seq,$i+1,$length),$damweight,$damdecay) , -display_id => $seq_->display_id."_SimAnc_".$nreads);
+		    ++$nreads;
+		    my $id;
+		    ($seq_->display_id) ? ($id = $seq_->display_id) : ($id = 'NO_ID');
+		    my $frag_ = Bio::Seq->new(-seq => damage(substr($seq,$i+1,$length),$damweight,$damdecay) , -display_id => $id."_SimAnc_".$nreads);
 		    $seqO_->write_seq($frag_);
 		    $VV && print STDERR "Reads so far: $nreads\n";
 		}

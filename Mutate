@@ -1,0 +1,68 @@
+#!/usr/bin/perl
+
+    use strict;
+    use warnings;
+    use Data::Dumper;
+    use Bio::SeqIO;
+
+
+#USAGE
+my $usage ="";
+
+#output factory
+
+my $seqI_ = Bio::SeqIO->new(-fh => \*STDIN , -format => 'fasta');
+my $seqO_ = Bio::SeqIO->new(-fh => \*STDOUT , -format => 'fasta');
+
+my $V = 0;
+
+my $tsprob = 0;
+my $tvprob = 0;
+
+( ($tsprob+$tvprob) > 1 ) && die "Probs must sum to <= 1\n";
+
+while (my $seq_ = $seqI_->next_seq)
+{
+    my $seq = $seq_->seq;
+    my $build;
+    
+    for my $i ( 0 .. (length $seq) - 1 )
+    {
+	my $nt = substr($seq,$i,1);
+	$V && print "\nnt: $nt\n";
+	my $decider = rand 1;
+	$V && print "0-$tsprob: ts\n$tsprob to " , $tvprob+$tsprob , " : tv\n>$tvprob: -\nDECIDER IS $decider\n";
+	my $mut_type;
+	($decider < $tsprob) ? ($mut_type = 'ts') : (($decider < ($tsprob + $tvprob)) ? ($mut_type = 'tv') : ($mut_type = '') );
+	$V && print "Decision: $mut_type\n";
+	
+	if ($mut_type eq 'ts')
+	{
+	    $V && print "Transition\n";
+	    ($nt eq 'A') && ($build .= 'G');
+	    ($nt eq 'G') && ($build .= 'A');
+	    ($nt eq 'C') && ($build .= 'T');	    
+	    ($nt eq 'T') && ($build .= 'C');
+	    $V && print "Build ends: " , substr($build,-10) , "\n";
+	}
+	elsif ($mut_type eq 'tv')
+	{
+	    $V && print "Transversion\n";
+	    ($nt eq 'A') && ($build .= ('T','C')[rand 2]);
+	    ($nt eq 'G') && ($build .= ('T','C')[rand 2]);
+	    ($nt eq 'C') && ($build .= ('A','G')[rand 2]);	    
+	    ($nt eq 'T') && ($build .= ('A','G')[rand 2]);
+	    $V && print "Build ends: " , substr($build,-10) , "\n";
+	}
+	else
+	{
+	    $build .= $nt;
+	}
+
+    }
+    
+    $seqO_->write_seq(Bio::Seq->new(-seq => $build , -display_id => $seq_->display_id))
+    
+}
+
+
