@@ -6,9 +6,7 @@
     use Getopt::Std;
     use Bio::SeqIO;
 
-binary_search(3,1..10);
 
-exit;
 
 #USAGE
 my $usage =
@@ -66,7 +64,7 @@ ARGUMENTS:	[interval] (default)	Desription
     my $paramchangeflag = 0;
     my %opts;
     
-    getopts('VXhi:n:s:S:m:M:p:d:D:r:b:',\%opts);   
+    getopts('PVXhi:n:s:S:m:M:p:d:D:r:b:u:a:',\%opts);   
     
     ($opts{'h'} && print STDERR $usage) && exit;
         
@@ -83,9 +81,9 @@ ARGUMENTS:	[interval] (default)	Desription
     my $frprop;
     my $V;
     my $VV = 0; #sneaky report var for working on this
+    my $up;
+    my $across;
 
-    ((my $infile = $opts{'i'}) && (-e $opts{'i'}) ) || (die "\nCheck input fasta file given with -i.\n"); #input file
-    if ($opts{'V'}) { $V = 1 ; $V = 1 }
     if ($opts{'n'}) { $ntot = $opts{'n'}} else {$ntot = 10000; $paramchangeflag = 1 } ; #n reads desired
         (($ntot =~ /^\d*\.?\d*$/) && ($ntot > 0)) || die "\nERROR: Desired reads (-n) must be a number greater than 0\n";
     if ($opts{'s'}) { $shape = $opts{'s'}} else {$shape = 4; $paramchangeflag = 1 } ; #shape param
@@ -96,6 +94,17 @@ ARGUMENTS:	[interval] (default)	Desription
         (($minlength =~ /^\d*\.?\d*$/) && ($minlength >= 0)) || die "\nERROR: Left end of beta distribution parameter (-m) must be a number greater than or equal to 0\n";
     if ($opts{'M'}) { $maxlength = $opts{'M'}} else {$maxlength = 280; $paramchangeflag = 1 } ; #Right end of beta distribution parameter
         (($maxlength =~ /^\d*\.?\d*$/) && ($maxlength > $minlength)) || die "\nERROR: Right end of beta distribution parameter (-M) must be a number greater than 0 and greater than left end (-m)\n";
+    if ($opts{'u'}) { $up = $opts{'u'}} else {$up = 20} ; #height of the ascii density plot in chars
+        (($up =~ /^\d*\.?\d*$/) && ($up > 5)) || die "\nERROR: Plot height (-u) must be a number greater than 4\n";
+    if ($opts{'a'}) { $across = $opts{'a'}} else {$across = 50} ; #width of the ascii density plot in chars
+        (($across =~ /^\d*\.?\d*$/) && ($across > 5)) || die "\nERROR: Plot width (-u) must be a number greater than 4\n";
+    if ($opts{'P'})
+    {
+	plot_beta($shape,$scale,$minlength,$maxlength,$across,$up);
+	exit;
+    }
+    ((my $infile = $opts{'i'}) && (-e $opts{'i'}) ) || (die "\nCheck input fasta file given with -i.\n"); #input file
+    if ($opts{'V'}) { $V = 1 ; $V = 1 }
     if ($opts{'p'}) { $nPu_vs_nPy = $opts{'p'}} else {$nPu_vs_nPy = 3; $paramchangeflag = 1 } ;  #purine/pyramidine break ratio. e.g. 2 means twice so likely to break at a purine
         (($nPu_vs_nPy =~ /^\d*\.?\d*$/) && ($nPu_vs_nPy >= 0 )) || die "\nERROR: Purine:Pyrimide break ratio parameter (-p) must be a number greater than 0\n";
     if (defined $opts{'d'}) { $damweight = $opts{'d'}} else {$damweight = .3; $paramchangeflag = 1 } ;  #damage weight. probability of end nucleotide being deaminated
@@ -107,7 +116,6 @@ ARGUMENTS:	[interval] (default)	Desription
  	(($frprop =~ /^\d*\.?\d*$/) && ($frprop >= 0) && ($frprop <= 1)) || die "\nERROR: Plus/Minus parameter (-r) must be a number from 0 to one\n";
     if ($opts{'b'}) { $baseline = $opts{'b'}} else {$baseline = .01; $paramchangeflag = 1 } ;  #forward/reverse (standard/reverse complement) ratio. accounts for disequilibrium between deamination patterns when strands are significantly different so that amplification bias occurs
  	(($baseline =~ /^\d*\.?\d*$/) && ($baseline >= 0) && ($baseline <= $damweight)) || die "\nERROR: Deamination baseline parameter must be from 0 and the damage weight ($damweight).\n";
-	
 	
     print STDERR "\nBeginning SimWreck with these parameters:\nInput file: $infile\nShape: $shape\n# reads: $ntot\nScale: $scale\nMin: $minlength\nMax: $maxlength\nBreakratio: $nPu_vs_nPy\nDamage weight: $damweight\nDamage decay: $damdecay\nDamage baseline: $baseline\nProportion plus strand: $frprop\n";
     ($dammode) ? print STDERR "Mode: damage-only\n\n" : print STDERR "Mode: Standard\n\n" ;
@@ -389,22 +397,54 @@ ARGUMENTS:	[interval] (default)	Desription
        return join '' , reverse ( split '' , $seq);
     }
     
-    sub binary_search
+sub plot_beta
+{
+    my $v = 1;
+    my ($shape , $scale , $minlength , $maxlength , $displen_h , $displen_v) = @_;
+
+    my @cols;
+    my @betas;
+    for ( 1 .. $displen_h )
     {
-	my $tgt = shift;
-	print "In: @_\nTgt: $tgt\n";
-	my $l = scalar @_;
-	my $a = $l/2;
-	my $b = $a - 1;
-	my $up = $_[$a];
-	my $down = $_[$b];
-	my $lower = 
-	my $upper = 
-	
-	print "Length: $l\nA: $a\nB: $b\nUp: $up\nDown: $down\n";
-	#(($up >= $tgt) && ($down <= $tgt)) && (return $b); work out logic tree here
-	
-	
-	
+	#print "Beta: " , beta_pdf(((2*$_)+1)/(2*$displen_h) , $shape , $scale ) , "\n";
+	push @betas , beta_pdf(((2*$_)+1)/(2*$displen_h) , $shape , $scale ); # get the right beta function
     }
+    my $max = max(@betas);
+    @betas = map {($_/$max)*$displen_v} @betas;
     
+    #print "@betas\n";
+    for ( 0 .. $displen_h -1 )
+    {
+	my $height = nint($betas[$_]);
+	($height =~ /^\d+$/) || ($height = 0);
+	#print "Height: $height\n";
+	my @thiscol = ('#') x $height;
+	@thiscol = (@thiscol, (' ') x ($displen_v - $height) );
+	push @cols , [@thiscol];
+    }
+    #print Dumper @cols;
+
+    for my $row (reverse(0 .. scalar @{$cols[0]}-1))
+    {
+	print map {@$_[$row]} @cols;
+	print "\n";
+    }
+
+    my $midlength = ($maxlength - $minlength)/2 + $minlength;
+    my $gaps = (scalar @cols) - (length $maxlength) - (length $minlength) - (length $midlength);
+    my $gap1 = nint ($gaps/2);
+    my $gap2 = $gaps-$gap1;
+
+    print '-' x scalar @cols;
+    print "\n$minlength" , ' ' x $gap1 , "$midlength" , ' ' x $gap2 , "$maxlength\n";
+}
+
+sub max #################################################################################################################################################################################################################################################################################
+{
+    my $best = shift;
+    foreach (@_)
+    {
+	($_ > $best) && ($best = $_)
+    }
+    $best;
+}
