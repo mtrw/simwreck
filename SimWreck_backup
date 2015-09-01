@@ -6,10 +6,6 @@
     use Getopt::Std;
     use Bio::SeqIO;
 
-binary_search(3,1..10);
-
-exit;
-
 #USAGE
 my $usage =
 "
@@ -130,7 +126,6 @@ ARGUMENTS:	[interval] (default)	Desription
     my $smallestlength;
     while (my $seq_ = $seqI_->next_seq)
     {
-	$dammode && ($seqO_->write_seq(Bio::Seq->new(-seq => damage($seq_->seq) , -display_id => $seq_->display_id."_SimWreck"))) && next;
 	$V && print STDERR "Length of " , $seq_->display_id , ": " , $seq_->length , "\n";
 	$totlength += $seq_->length;
 	if (! defined $smallestlength || $seq_->length < $smallestlength)
@@ -138,15 +133,11 @@ ARGUMENTS:	[interval] (default)	Desription
 	    $smallestlength = $seq_->length;
 	    $V && print STDERR "Smallest length: $smallestlength\n";
 	}
-	
     }
-    $dammode && (print "Program Completed\n") && exit;
-    #exit;
-    
     $V && print STDERR "Totlength: $totlength\n";
     $V && print STDERR "Smallest length FINAL: $smallestlength\n";
     
-    ($maxlength > $smallestlength) && print STDERR "WARNING: Some contigs shorter than largest expected reads: expect possible excessive mostly-N reads from these contigs\n";
+    ($maxlength > $smallestlength) && print STDERR "WARNING: Some contigs shorther than largest expected reads: expect possible excessive mostly-N reads from these contigs\n";
     
     
     $seqI_ = Bio::SeqIO->new(-file => $infile , -format => 'fasta'); #reload file for second pass
@@ -276,8 +267,6 @@ ARGUMENTS:	[interval] (default)	Desription
     
     
     
-
-    
     
     
     ###########################################################################################################################################################################################################################################################################################
@@ -388,23 +377,3 @@ ARGUMENTS:	[interval] (default)	Desription
        $seq =~ tr/ACGTNRYSWKMBDHV/TGCANYRSWMKVHDB/;
        return join '' , reverse ( split '' , $seq);
     }
-    
-    sub binary_search
-    {
-	my $tgt = shift;
-	print "In: @_\nTgt: $tgt\n";
-	my $l = scalar @_;
-	my $a = $l/2;
-	my $b = $a - 1;
-	my $up = $_[$a];
-	my $down = $_[$b];
-	my $lower = 
-	my $upper = 
-	
-	print "Length: $l\nA: $a\nB: $b\nUp: $up\nDown: $down\n";
-	#(($up >= $tgt) && ($down <= $tgt)) && (return $b); work out logic tree here
-	
-	
-	
-    }
-    

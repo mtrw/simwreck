@@ -258,12 +258,10 @@ ARGUMENTS:	[min,max] (default)	Desription
 	my $scale = shift;
 	my $minlength = shift;
 	my $maxlength = shift;
-	my $V = shift;
-	my $v = 0;
+    my $V = shift;
 	my $i = 0;
 	
-	$v && print STDERR "Building prob dist for the region in which a break may occur: @_\n";
-	
+	$V && print STDERR "Building prob dist for the region in which a break may occur: @_\n";
 	
 	foreach (@_)
 	{
@@ -275,7 +273,7 @@ ARGUMENTS:	[min,max] (default)	Desription
 		$s = beta_pdf(((2*$i)+1)/(2*(scalar @_)) , $shape , $scale );
 		$V && print STDERR "Our unnormalised probability score is therefore $s\n";
 	    }
-	    else
+        else
 	    {
 		    $V && print STDERR "It's a pyrimidine (or unknown) ($_), $i from the top, so we'll get the distribution score at x= ",((2*$i)+1), " on " ,(2*(scalar @_))  ," = " , ((2*$i)+1)/(2*(scalar @_)) , ", distribution contribution of " , beta_pdf(((2*$i)+1)/(2*(scalar @_)) , $shape , $scale) , " and a nucleotide scale factor of " , $nPu_vs_nPy , "\n";
 		    $s = $nPu_vs_nPy*beta_pdf(((2*$i)+1)/(2*(scalar @_)) , $shape , $scale );

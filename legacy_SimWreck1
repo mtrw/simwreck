@@ -22,6 +22,7 @@ ______________________________
 
 
 SYNOPSIS:	GenWreck -i genome.fasta
+		Genwreck -X -i Sanger_seq.fasta #implement DAMAGE ONLY MODE#################################################################################################################
 		GenWreck -i genome.fasta -n 10000 -s 2 -S 8 -m 100 -M 450 -p 2.2 -d .8 -D .2
 		#with GNU parallel
 		parallel 'echo {/.}; GenWreck {} > out_data/{/.}_simanc.fa ; echo ;' ::: data/*
@@ -259,23 +260,21 @@ ARGUMENTS:	[min,max] (default)	Desription
 	my $minlength = shift;
 	my $maxlength = shift;
 	my $V = shift;
-	my $v = 0;
 	my $i = 0;
 	
-	$v && print STDERR "Building prob dist for the region in which a break may occur: @_\n";
-	
+	$V && print STDERR "Building prob dist for the region in which a break may occur: @_\n";
 	
 	foreach (@_)
 	{
 	    my $s = 0;
-	    $v && print STDERR "Currently exploring the $i" . "th possible break position; considering this: $_\n";
+	    $VV && print STDERR "Currently exploring the $i" . "th possible break position; considering this: $_\n";
 	    if ($_ =~ /[AaGg]/)
 	    {
 		$V && print STDERR "It's a purine ($_), $i from the top, so we'll get the distribution score at x= ",((2*$i)+1), " on " ,(2*(scalar @_))  ," = " , ((2*$i)+1)/(2*(scalar @_)) , ", distribution contribution of " , beta_pdf(((2*$i)+1)/(2*(scalar @_)) , $shape , $scale) , " and a nucleotide scale factor of 1 (since we are downstream of a PYRIMIDINE, but it's on the other strand).\n";
 		$s = beta_pdf(((2*$i)+1)/(2*(scalar @_)) , $shape , $scale );
 		$V && print STDERR "Our unnormalised probability score is therefore $s\n";
 	    }
-	    else
+        else
 	    {
 		    $V && print STDERR "It's a pyrimidine (or unknown) ($_), $i from the top, so we'll get the distribution score at x= ",((2*$i)+1), " on " ,(2*(scalar @_))  ," = " , ((2*$i)+1)/(2*(scalar @_)) , ", distribution contribution of " , beta_pdf(((2*$i)+1)/(2*(scalar @_)) , $shape , $scale) , " and a nucleotide scale factor of " , $nPu_vs_nPy , "\n";
 		    $s = $nPu_vs_nPy*beta_pdf(((2*$i)+1)/(2*(scalar @_)) , $shape , $scale );
