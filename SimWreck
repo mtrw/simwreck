@@ -235,7 +235,7 @@ ARGUMENTS:	[interval] (default)	Desription
 			my $id;
 			($seq_->display_id) ? ($id = $seq_->display_id) : ($id = 'NO_ID');
 			$V && print "Into Damage: " , join ('',@seqarray[($i+1)..($i+1+$length)]) , "\n";
-			my $frag_ = Bio::Seq->new(-seq => damage(join('',@seqarray[($i+1)..($i+$length)]),$damweight,$damdecay,$baseline,$V) , -display_id => $id."_SimAnc_".$nreads);
+			my $frag_ = Bio::Seq->new(-seq => damage(join('',@seqarray[($i+1)..($i+$length)]),$damweight,$damdecay,$baseline,$V) , -display_id => $id."_SimWreck_".$nreads);
 			$seqO_->write_seq($frag_);
 			$V && print STDERR "Reads so far: $nreads\n";
 			if ((defined $starts_pu[1]) && ($starts_pu[0] == $starts_pu[1]))
@@ -308,6 +308,7 @@ ARGUMENTS:	[interval] (default)	Desription
 	
 	$V && print STDERR "Building prob dist for the region in which a break may occur: @_\n";
 	
+	my @cumscores;
 	foreach (@_)
 	{
 	    my $s = 0;
@@ -327,24 +328,31 @@ ARGUMENTS:	[interval] (default)	Desription
 	    
 	    push @scores , $s;
 	    $totscore += $s;
-	    $V && print "Score so far: $totscore\n";
+	    push @cumscores, $totscore;
+	    $V && print STDERR "Score so far: $totscore\nTotscores array: @cumscores[0..10] ...\n";
 	    ++$i
 	}
 	
 	my $decider = rand($totscore);
 	$V && print STDERR "We\'re out of that loop, second pass now with total score $totscore and decider $decider\n";
-	$V && print STDERR "Scores:\n" , join ("\n" , @scores) , "\n";
-	my $cumscore = 0;
-	for ( my $i = 0 ; $i < scalar @scores ; ++$i )
-	{
-	    $cumscore += $scores[$i];
-	    $V && print STDERR "Cumulative score so far: $cumscore\nWould-be breakpoint is at " , $minlength+$i , ", (or $i beyond minlength)\n" ;
-	    if ($decider <= $cumscore)
-	    {
-		$V && print STDERR "Giving back your fragment\'s length: " , $minlength+$i , "\n";
-		return $minlength+$i;
-	    }
-	}
+	$V && print STDERR "Cumulative Scores:\n" , join ("\n" , @cumscores) , "\n";
+	$V && print STDERR "First score pre-decider: " , binary_search([@cumscores],$decider) , "\n";
+	
+	
+	
+	return binary_search([@cumscores],$decider)+$minlength+1;
+	
+	#my $cumscore = 0;
+	#for ( my $i = 0 ; $i < scalar @scores ; ++$i )
+	#{
+	#    $cumscore += $scores[$i];
+	#    $V && print STDERR "Cumulative score so far: $cumscore\nWould-be breakpoint is at " , $minlength+$i , ", (or $i beyond minlength)\n" ;
+	#    if ($decider <= $cumscore)
+	#    {
+	#	$V && print STDERR "Giving back your fragment\'s length: " , $minlength+$i , "\n";
+	#	return $minlength+$i;
+	#    }
+	#}
     }
     
     sub damage ############################################################################################################################################################################################################################################################################################
@@ -397,54 +405,79 @@ ARGUMENTS:	[interval] (default)	Desription
        return join '' , reverse ( split '' , $seq);
     }
     
-sub plot_beta
-{
-    my $v = 1;
-    my ($shape , $scale , $minlength , $maxlength , $displen_h , $displen_v) = @_;
-
-    my @cols;
-    my @betas;
-    for ( 1 .. $displen_h )
+    sub plot_beta
     {
-	#print "Beta: " , beta_pdf(((2*$_)+1)/(2*$displen_h) , $shape , $scale ) , "\n";
-	push @betas , beta_pdf(((2*$_)+1)/(2*$displen_h) , $shape , $scale ); # get the right beta function
-    }
-    my $max = max(@betas);
-    @betas = map {($_/$max)*$displen_v} @betas;
+	my $v = 1;
+	my ($shape , $scale , $minlength , $maxlength , $displen_h , $displen_v) = @_;
     
-    #print "@betas\n";
-    for ( 0 .. $displen_h -1 )
-    {
-	my $height = nint($betas[$_]);
-	($height =~ /^\d+$/) || ($height = 0);
-	#print "Height: $height\n";
-	my @thiscol = ('#') x $height;
-	@thiscol = (@thiscol, (' ') x ($displen_v - $height) );
-	push @cols , [@thiscol];
+	my @cols;
+	my @betas;
+	for ( 1 .. $displen_h )
+	{
+	    #print "Beta: " , beta_pdf(((2*$_)+1)/(2*$displen_h) , $shape , $scale ) , "\n";
+	    push @betas , beta_pdf(((2*$_)+1)/(2*$displen_h) , $shape , $scale ); # get the right beta function
+	}
+	my $max = max(@betas);
+	@betas = map {($_/$max)*$displen_v} @betas;
+	
+	#print "@betas\n";
+	for ( 0 .. $displen_h -1 )
+	{
+	    my $height = nint($betas[$_]);
+	    ($height =~ /^\d+$/) || ($height = 0);
+	    #print "Height: $height\n";
+	    my @thiscol = ('#') x $height;
+	    @thiscol = (@thiscol, (' ') x ($displen_v - $height) );
+	    push @cols , [@thiscol];
+	}
+	#print Dumper @cols;
+    
+	for my $row (reverse(0 .. scalar @{$cols[0]}-1))
+	{
+	    print map {@$_[$row]} @cols;
+	    print "\n";
+	}
+    
+	my $midlength = ($maxlength - $minlength)/2 + $minlength;
+	my $gaps = (scalar @cols) - (length $maxlength) - (length $minlength) - (length $midlength);
+	my $gap1 = nint ($gaps/2);
+	my $gap2 = $gaps-$gap1;
+    
+	print '-' x scalar @cols;
+	print "\n$minlength" , ' ' x $gap1 , "$midlength" , ' ' x $gap2 , "$maxlength\n";
     }
-    #print Dumper @cols;
-
-    for my $row (reverse(0 .. scalar @{$cols[0]}-1))
+    
+    sub max #################################################################################################################################################################################################################################################################################
     {
-	print map {@$_[$row]} @cols;
-	print "\n";
+	my $best = shift;
+	foreach (@_)
+	{
+	    ($_ > $best) && ($best = $_)
+	}
+	$best;
     }
-
-    my $midlength = ($maxlength - $minlength)/2 + $minlength;
-    my $gaps = (scalar @cols) - (length $maxlength) - (length $minlength) - (length $midlength);
-    my $gap1 = nint ($gaps/2);
-    my $gap2 = $gaps-$gap1;
-
-    print '-' x scalar @cols;
-    print "\n$minlength" , ' ' x $gap1 , "$midlength" , ' ' x $gap2 , "$maxlength\n";
-}
-
-sub max #################################################################################################################################################################################################################################################################################
-{
-    my $best = shift;
-    foreach (@_)
-    {
-	($_ > $best) && ($best = $_)
+    
+    sub binary_search
+    { # list must already be sorted!
+        my $tgt = $_[1];
+        my ($top,$bottom);
+        (!(ref $_[2]) || (scalar @{$_[2]} != 2)) ? (($top,$bottom) = ( (scalar @{$_[0]}) - 1 , 0 )) : (($bottom,$top) = ( $_[2][0] ,  $_[2][1] ));
+        my @array = @{$_[0]}[$bottom..$top];
+        my $l = $top - $bottom + 1;
+        my $up = int ($bottom + $l/2);
+        my $down = $up - 1;
+        my $upval = $_[0][$up];
+        my $downval = $_[0][$down];
+        if ($l == 1)
+        {
+            if ($_[0][$bottom] < $tgt)
+            {
+                return $up;
+            }
+            return 'NA';
+        }
+        ($downval > $tgt) && (return binary_search(@_[0..1],[$bottom,$down]));
+        ($upval < $tgt) && (return binary_search(@_[0..1],[$up,$top]));
+        ($upval == $tgt) &&  (return binary_search(@_[0..1],[$bottom,$down]));
+        return $down;
     }
-    $best;
-}
