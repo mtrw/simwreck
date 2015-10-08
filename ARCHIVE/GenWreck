@@ -1,0 +1,352 @@
+#!/usr/bin/perl
+
+    use strict;
+    use warnings;
+    use Data::Dumper;
+    use Getopt::Std;
+    use Bio::SeqIO;
+
+#USAGE
+my $usage =
+"
+********** GenWreck **********
+             V1.0
+ Mark Timothy Rabanus-Wallace
+ *****************************
+______________________________
+
+An aDNA read simulator for testing analysis pipelines.
+Give it a genome and tell it what condition the reads will be in.
+Face the STDOUT and prepare to catch your sequences.
+______________________________
+
+
+SYNOPSIS:	GenWreck -i genome.fasta
+		GenWreck -i genome.fasta -n 10000 -s 2 -S 8 -m 100 -M 450 -p 2.2 -d .8 -D .2
+		#with GNU parallel
+		parallel 'echo {/.}; GenWreck {} > out_data/{/.}_simanc.fa ; echo ;' ::: data/*
+		
+ARGUMENTS:	[min,max] (default)	Desription
+    
+    General
+    
+    -i 					Genome file to make reads from, in fasta format.
+    -n 		[1,inf]	(10000)		Number of reads desired.
+
+    Size distribution
+    
+    -s 		[>0,inf] (4)	Shape parameter (alpha).
+    -S 		[>0,inf] (4)	Scale parameter (beta).
+    -m 		[0,inf]	(80)	Nucleotide length at left end of beta distribution.
+    -M 		[0,inf]	(280)	Nucleotide length at right end of beta distribution.
+    
+    Damage
+    
+    -p 		[0,inf]	(3)	Depurination weight parameter. Ratio of nicks that occur 3' of a purine:3' of a pyrimidine. (e.g. at 2, it is twice as likely that a strand will begin or end with a purine).
+    -d 		[0,inf]	(.3)	Deamination weight parameter, influencing how frequently deamination results in pseudomutations.
+    -D 		[0,inf] (.5)	Deamination decay parameter, influencing how the rate of deamination decays further from the ends of the sequence.
+
+";
+
+
+! $ARGV[0] && (print STDERR $usage) && exit;
+
+#vars, params, args
+    
+    my $illegalflag = 1;
+    my $shortflag = 1;
+    my $paramchangeflag = 0;
+    my %opts;
+    
+    getopts('Vhi:n:s:S:m:M:p:d:D:',\%opts);   
+    
+    ($opts{'h'} && print STDERR $usage) && exit;
+        
+    my $ntot;
+    my $shape;
+    my $scale;
+    my $minlength;
+    my $maxlength;
+    my $nPu_vs_nPy;
+    my $damweight;
+    my $damdecay;
+    my $V = 0;
+    my $VV;
+    my $v = 1; #sneaky, for specific bug fixes
+
+    ((my $infile = $opts{'i'}) && (-e $opts{'i'}) ) || (die "\nCheck input fasta file given with -i.\n"); #input file
+    if ($opts{'V'}) { $V = 1 ; $VV = 1 }
+    if ($opts{'n'}) { $ntot = $opts{'n'}} else {$ntot = 10000; $paramchangeflag = 1 } ; #n reads desired
+        (($ntot =~ /^\d*\.?\d*$/) && ($ntot > 0)) || die "\nERROR: Desired reads (-n) must be a number greater than zero\n";
+    if ($opts{'s'}) { $shape = $opts{'s'}} else {$shape = 4; $paramchangeflag = 1 } ; #shape param
+        (($shape =~ /^\d*\.?\d*$/) && ($shape >= 0)) || die "\nERROR: Shape parameter (-s) must be a number greater than zero\n";
+    if ($opts{'S'}) { $scale = $opts{'S'}} else {$scale = 4; $paramchangeflag = 1 } ; #scale param
+        (($scale =~ /^\d*\.?\d*$/) && ($scale >= 0)) || die "\nERROR: Scale parameter (-S) must be a number greater than zero\n";
+    if ($opts{'m'}) { $minlength = $opts{'m'}} else {$minlength = 80; $paramchangeflag = 1 } ; #Left end of beta distribution parameter
+        (($minlength =~ /^\d*\.?\d*$/) && ($minlength >= 0)) || die "\nERROR: Left end of beta distribution parameter (-m) must be a number greater than zero\n";
+    if ($opts{'M'}) { $maxlength = $opts{'M'}} else {$maxlength = 280; $paramchangeflag = 1 } ; #Right end of beta distribution parameter
+        (($maxlength =~ /^\d*\.?\d*$/) && ($maxlength > $minlength)) || die "\nERROR: Right end of beta distribution parameter (-M) must be a number greater than zero and greater than left end (-m)\n";
+    if ($opts{'p'}) { $nPu_vs_nPy = $opts{'p'}} else {$nPu_vs_nPy = 3; $paramchangeflag = 1 } ;  #purine/pyramidine break ratio. e.g. 2 means twice so likely to break at a purine
+        (($nPu_vs_nPy =~ /^\d*\.?\d*$/) && ($nPu_vs_nPy >= 0 )) || die "\nERROR: Purine:Pyrimide break ratio parameter (-p) must be a number greater than zero\n";
+    if (defined $opts{'d'}) { $damweight = $opts{'d'}} else {$damweight = .3; $paramchangeflag = 1 } ;  #damage weight. pribability of end nucleotide being deaminated
+        (($damweight =~ /^\d*\.?\d*$/) && ($damweight >= 0 ) && ($damweight <= 1 )) || die "\nERROR: Damage weight parameter (-d) must be a number from zero to one\n";
+    if ($opts{'D'}) { $damdecay = $opts{'D'}} else {$damdecay = .5; $paramchangeflag = 1 } ;  #damage weight. pribability of end nucleotide being deaminated
+        (($damdecay =~ /^\d*\.?\d*$/) && ($damdecay >= 0 )) || die "\nERROR: Damage weight parameter (-d) must be a number from zero to one\n";
+    
+    print STDERR "\nBeginning GenWreck with these parameters:\nInput file: $infile\nShape: $shape\n# reads: $ntot\nScale: $scale\nMin: $minlength\nMax: $maxlength\nBreakratio: $nPu_vs_nPy\nDamage weight: $damweight\nDamage decay: $damdecay\n\n";
+    $paramchangeflag && print STDERR "WARNING: Parameters altered or set automatically to default values\n";
+    
+    #output factory
+    
+    my $seqO_ = Bio::SeqIO->new(-fh => \*STDOUT , -format => 'fasta');
+    my $seqI_ = Bio::SeqIO->new(-file => $infile , -format => 'fasta');
+
+    
+    ($ntot < 1000) && print STDERR "WARNING: Low number of sequences from $infile requested: expect rounding errors in number returned.\n";
+    (($maxlength - $minlength) < 100) && print STDERR "WARNING: Small size range for fragments may lead to zero-length fragments or generally odd results. Consider altering -m and -M.\n";
+
+########################################### GUTS ###################################################
+    
+    
+    $VV && print STDERR "First pass for numbers\' sake\n";
+    my $totlength = 0;
+    my $smallestlength;
+    while (my $seq_ = $seqI_->next_seq)
+    {
+	$VV && print STDERR "Length of " , $seq_->display_id , ": " , $seq_->length , "\n";
+	$totlength += $seq_->length;
+	if (! defined $smallestlength || $seq_->length < $smallestlength)
+	{
+	    $smallestlength = $seq_->length;
+	    $VV && print "Smallest length: $smallestlength\n";
+	}
+	
+    }
+    $V && print STDERR "Totlength: $totlength\n";
+    $V && print "Smallest length FINAL: $smallestlength\n";
+        
+    ($maxlength > $smallestlength) && print STDERR "WARNING: Some contigs shorther than largest expected reads: expect possible excessive mostly-N reads from these contigs\n";
+    
+    $seqI_ = Bio::SeqIO->new(-file => $infile , -format => 'fasta');    
+    while (my $seq_ = $seqI_->next_seq)
+    {
+	my $nreads = 0;
+	my $n = nint((($seq_->length)/$totlength) * $ntot);
+	
+	$VV && print STDERR '###' x 50 , "\nNEW SEQUENCE: " , $seq_->display_id , " \nLocal n is $n\n";
+	
+	my $seq = $seq_->seq;
+	for (1..$maxlength)
+	{
+	    $seq .= 'N';
+	}
+	my $seqlength = length $seq;
+	if (($seqlength < 1000) && ($shortflag))
+	{
+	    print STDERR "WARNING: Short contig(s) detected: expect rounding errors in number of reads returned.\n";
+	    $shortflag = 0;
+	}
+	$VV && print STDERR "Seq is: " , $seq_->seq , "\n\n";
+	if (($seq =~ s/(?![AGCTagct])/N/) && ($illegalflag))
+	{
+	    print STDERR "WARNING: Non-AGTC nucleotides in at least one sequence changed to Ns.\n";
+	    $illegalflag = 0;
+	}
+	my $nPu = $seq =~ tr/[AaGg]//;
+	my $nPy = $seqlength - $seq =~ tr/[Nn]// - $nPu;
+	
+	$VV && print STDERR "Seq length: $seqlength\n";
+	$VV && print STDERR "Purines: $nPu\nPyramidines: $nPy\n";
+	
+	my $nPu_breaks = nint((($nPu_vs_nPy*($nPu/$nPy))*$n)/(1+($nPu_vs_nPy*($nPu/$nPy))));
+	my $nPy_breaks = $n - $nPu_breaks;
+	
+	$VV && print STDERR "Purine breaks: $nPu_breaks\nPyramidine breaks: $nPy_breaks\n";
+	
+	my @starts_pu;
+	my @starts_py;
+	for (1..$nPu_breaks)
+	{
+	    push @starts_pu , int(rand ($nPu))
+	}
+	for (1..$nPy_breaks)
+	{
+	    push @starts_py , int(rand ($nPy))
+	}
+	@starts_py = sort {$a <=> $b} @starts_py; @starts_pu = sort {$a <=> $b} @starts_pu;
+	
+	$VV && print STDERR "Breaks pu:\n\t" , join ("\n\t" , @starts_pu) , "\nBreaks py:\n\t" , join ("\n\t" , @starts_py) , "\n";
+	
+	my $pucount = -1;
+	my $pycount = -1;
+	my @seqarray = split '' , $seq;
+	for ( my $i = 0 ; $i <= $seqlength-$maxlength ; ++$i )
+	{
+	    $VV && print STDERR "i: $i\n";
+	    $VV && print STDERR "nt is $seqarray[$i]\n";
+	    if ($seqarray[$i] =~ /[AaGg]/)
+	    {
+		++$pucount;
+		$VV && print STDERR "That's the $pucount"."th purine\n";
+		if ( (defined $starts_pu[0]) && ($pucount == $starts_pu[0]))
+		{
+		    $VV && $starts_pu[0] && $starts_pu[1] && print STDERR "\t ... and it's a startpoint. Next is at $starts_pu[1].\n";
+
+		    $V && print STDERR "Guaranteed inclusion: " , @seqarray[($i+1) .. ($i+$minlength)] , "\n";
+		    my $length = get_length($nPu_vs_nPy , $shape , $scale , $minlength , $maxlength , $V , @seqarray[($i+1+$minlength) .. ($i+1+$maxlength)]);
+		    $VV && print STDERR "Length: $length\n";
+		    ++$nreads;
+		    my $id;
+		    ($seq_->display_id) ? ($id = $seq_->display_id) : ($id = 'NO_ID');
+		    $V && print "Into Damage: " , join ('',@seqarray[($i+1)..($i+1+$length)]) , "\n";
+		    my $frag_ = Bio::Seq->new(-seq => damage(join('',@seqarray[($i+1)..($i+$length)]),$damweight,$damdecay,$V) , -display_id => $id."_SimAnc_".$nreads);
+		    $seqO_->write_seq($frag_);
+		    $VV && print STDERR "Reads so far: $nreads\n";
+		    if ((defined $starts_pu[1]) && ($starts_pu[0] == $starts_pu[1]))
+		    {
+			--$pucount;
+			--$i;
+			$VV && print STDERR "There's a doubleup. Reducing pucount to $pucount and i to $i\n";
+		    }
+		    shift @starts_pu;
+		}
+	    }
+	    elsif ($seqarray[$i] =~ /[TtCc]/)
+	    {
+		++$pycount;
+		$VV && print STDERR "That's the $pycount"."th pyrimidine\n";
+		if ((defined $starts_py[0]) && ($pycount == $starts_py[0]))
+		{
+		    $VV && $starts_py[0]  && $starts_py[1] && print STDERR "\t ... and it's a startpoint. Next is at $starts_py[1].\n";
+
+		    $V && print STDERR "Guaranteed inclusion: " , @seqarray[($i+1) .. ($i+$minlength)] , "\n";
+		    my $length = get_length($nPu_vs_nPy , $shape , $scale , $minlength , $maxlength , $V , @seqarray[($i+1+$minlength) .. ($i+1+$maxlength)]);
+		    $VV && print STDERR "Length: $length\n";
+		    ++$nreads;
+		    my $id;
+		    ($seq_->display_id) ? ($id = $seq_->display_id) : ($id = 'NO_ID');
+		    $V && print "Into Damage: " , join ('',@seqarray[($i+1)..($i+1+$length)]) , "\n";
+		    my $frag_ = Bio::Seq->new(-seq => damage(join('',@seqarray[($i+1)..($i+$length)]),$damweight,$damdecay,$V) , -display_id => $id."_SimAnc_".$nreads);
+		    $seqO_->write_seq($frag_);
+		    $VV && print STDERR "Reads so far: $nreads\n";
+		    if ((defined $starts_py[1]) && ($starts_py[0] == $starts_py[1]))
+		    {
+			--$pycount;
+			--$i;
+			$VV && print STDERR "REDUCING pycount TO $pycount and i to $i\n";
+		    }
+		    shift @starts_py;
+		}
+	    }
+	}
+    }
+    
+    print STDERR "Program completed\n";
+    
+    ###########################################################################################################################################################################################################################################################################################
+    ############################################################################################################################################################################		SUBS		###############################################################################
+    ###########################################################################################################################################################################################################################################################################################
+    
+    
+    sub get_length ###################################################################################################################################################################
+    {
+	$V && print STDERR "Params: @_[0..4]\n";
+	my @scores;
+	my $totscore;
+	my $nPu_vs_nPy = shift;
+	my $shape = shift;
+	my $scale = shift;
+	my $minlength = shift;
+	my $maxlength = shift;
+	my $V = shift;
+	my $v = 0;
+	my $i = 0;
+	
+	$v && print STDERR "Building prob dist for the region in which a break may occur: @_\n";
+	
+	
+	foreach (@_)
+	{
+	    my $s = 0;
+	    $v && print STDERR "Currently exploring the $i" . "th possible break position; considering this: $_\n";
+	    if ($_ =~ /[AaGg]/)
+	    {
+		$V && print STDERR "It's a purine ($_), $i from the top, so we'll get the distribution score at x= ",((2*$i)+1), " on " ,(2*(scalar @_))  ," = " , ((2*$i)+1)/(2*(scalar @_)) , ", distribution contribution of " , beta_pdf(((2*$i)+1)/(2*(scalar @_)) , $shape , $scale) , " and a nucleotide scale factor of 1 (since we are downstream of a PYRIMIDINE, but it's on the other strand).\n";
+		$s = beta_pdf(((2*$i)+1)/(2*(scalar @_)) , $shape , $scale );
+		$V && print STDERR "Our unnormalised probability score is therefore $s\n";
+	    }
+	    else
+	    {
+		    $V && print STDERR "It's a pyrimidine (or unknown) ($_), $i from the top, so we'll get the distribution score at x= ",((2*$i)+1), " on " ,(2*(scalar @_))  ," = " , ((2*$i)+1)/(2*(scalar @_)) , ", distribution contribution of " , beta_pdf(((2*$i)+1)/(2*(scalar @_)) , $shape , $scale) , " and a nucleotide scale factor of " , $nPu_vs_nPy , "\n";
+		    $s = $nPu_vs_nPy*beta_pdf(((2*$i)+1)/(2*(scalar @_)) , $shape , $scale );
+		    $V && print STDERR "Our unnormalised probability score is therefore $s\n";
+	    }
+	    
+	    push @scores , $s;
+	    $totscore += $s;
+	    $V && print "Score so far: $totscore\n";
+	    ++$i
+	}
+	
+	my $decider = rand($totscore);
+	$V && print STDERR "We\'re out of that loop, second pass now with total score $totscore and decider $decider\n";
+	$V && print STDERR "Scores:\n" , join ("\n" , @scores) , "\n";
+	my $cumscore = 0;
+	for ( my $i = 0 ; $i < scalar @scores ; ++$i )
+	{
+	    $cumscore += $scores[$i];
+	    $V && print STDERR "Cumulative score so far: $cumscore\nWould-be breakpoint is at " , $minlength+$i , ", (or $i beyond minlength)\n" ;
+	    if ($decider <= $cumscore)
+	    {
+		$V && print STDERR "Giving back your fragment\'s length: " , $minlength+$i , "\n";
+		return $minlength+$i;
+	    }
+	}
+    }
+    
+    sub damage ############################################################################################################################################################################################################################################################################################
+    {
+	my $seqbuild;	
+	my ($seq,$damweight,$damdecay,$V) = @_;
+	for ( my $i = 0 ; $i < length ($seq) ; ++$i )
+	{
+
+	    $V && print STDERR "DAMAGE: Dist from top: $i ; Dist from end: " , (length ($seq) - $i) , "\n";
+	    $V && print STDERR "Nt is " , substr($seq,$i,1) , ". Value to beat (5' to 3') is " , $damweight*exp(-(((length ($seq) - $i - 1))*$damdecay)) , "\n";
+	    if ((substr($seq,$i,1) eq 'C') && (rand 1 < $damweight*exp(-(($i)*$damdecay))))
+	    {
+		$V && print STDERR "C -> T\n";
+		$seqbuild .= 'T';
+	    }
+	    elsif ((substr($seq,$i,1) eq 'G') && (rand 1 < $damweight*exp(-(((length ($seq) - $i - 1))*$damdecay))))
+	    {
+		$V && print STDERR "G -> A\n";
+		$seqbuild .= 'A';
+	    }
+	    else
+	    {
+		$seqbuild .= substr($seq,$i,1);
+	    }
+	    $V && print STDERR "Seqbuild: $seqbuild\n"
+	}
+	$seqbuild;
+    }
+
+
+
+    sub beta_pdf ###############################################################################################################################################################################
+    {
+	(($_[0]**($_[1]-1))*(1-$_[0])**($_[2]-1))#/beta($_[1],$_[2]);
+    }
+    
+    sub nint ################################################################################################################################################################################
+    {
+	(($_[0] - int($_[0])) >= 0.5) ? return int($_[0]) + 1 : return int($_[0])
+    }
+    
+    sub rc ################################################################################################################################################################################
+    {
+       my $seq = $_[0];
+       $seq =~ tr/ACGTNRYSWKMBDHV/TGCANYRSWMKVHDB/;
+       return join '' , reverse ( split '' , $seq);
+    }
