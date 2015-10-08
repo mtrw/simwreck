@@ -35,7 +35,7 @@ ARGUMENTS:	[interval] (default)	Desription
     
     -i 					Genome file to make reads from, in fasta format.
     -n		[1,+inf) (10000)	Number of reads desired.
-    -r 		[0,1] (.5)		Proportion of minus strand reads.
+    -r 		[0,1] (.5)		Proportion of minus strand reads.    
     -X					Damage-only mode. Returns each input sequence whole, with damage added as per any damage parameters specified.
 
     Size distribution
@@ -51,6 +51,12 @@ ARGUMENTS:	[interval] (default)	Desription
     -d 		[0,+inf) (.3)		Deamination weight parameter, influencing how frequently deamination results in pseudomutations.
     -D 		[0,+inf) (.5)		Deamination decay parameter, influencing how the rate of deamination decays further from the ends of the sequence.
     -b 		[0,-d] (.01)		Baseline rate of deamination.
+    
+    Plot Funtion
+    
+    -P 					Plot mode.
+    -a 		[0,+inf) (120)		Plot width in characters.
+    -u 		[0,+inf) (45)		Plot height in characters.
 
 ";
 
@@ -94,9 +100,9 @@ ARGUMENTS:	[interval] (default)	Desription
         (($minlength =~ /^\d*\.?\d*$/) && ($minlength >= 0)) || die "\nERROR: Left end of beta distribution parameter (-m) must be a number greater than or equal to 0\n";
     if ($opts{'M'}) { $maxlength = $opts{'M'}} else {$maxlength = 280; $paramchangeflag = 1 } ; #Right end of beta distribution parameter
         (($maxlength =~ /^\d*\.?\d*$/) && ($maxlength > $minlength)) || die "\nERROR: Right end of beta distribution parameter (-M) must be a number greater than 0 and greater than left end (-m)\n";
-    if ($opts{'u'}) { $up = $opts{'u'}} else {$up = 20} ; #height of the ascii density plot in chars
+    if ($opts{'u'}) { $up = $opts{'u'}} else {$up = 45} ; #height of the ascii density plot in chars
         (($up =~ /^\d*\.?\d*$/) && ($up > 5)) || die "\nERROR: Plot height (-u) must be a number greater than 4\n";
-    if ($opts{'a'}) { $across = $opts{'a'}} else {$across = 50} ; #width of the ascii density plot in chars
+    if ($opts{'a'}) { $across = $opts{'a'}} else {$across = 120} ; #width of the ascii density plot in chars
         (($across =~ /^\d*\.?\d*$/) && ($across > 5)) || die "\nERROR: Plot width (-u) must be a number greater than 4\n";
     if ($opts{'P'})
     {
@@ -405,7 +411,7 @@ ARGUMENTS:	[interval] (default)	Desription
        return join '' , reverse ( split '' , $seq);
     }
     
-    sub plot_beta
+    sub plot_beta ##################################################################################################################################################################################################################################################################################
     {
 	my $v = 1;
 	my ($shape , $scale , $minlength , $maxlength , $displen_h , $displen_v) = @_;
@@ -457,7 +463,7 @@ ARGUMENTS:	[interval] (default)	Desription
 	$best;
     }
     
-    sub binary_search
+    sub binary_search ##################################################################################################################################################################################################################################################################################
     { # list must already be sorted!
         my $tgt = $_[1];
         my ($top,$bottom);
