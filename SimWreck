@@ -145,7 +145,7 @@ ARGUMENTS:	[interval] (default)	Desription
     my $smallestlength;
     while (my $seq_ = $seqI_->next_seq)
     {
-	$dammode && ($seqO_->write_seq(Bio::Seq->new(-seq => damage($seq_->seq) , -display_id => $seq_->display_id."_SimWreck"))) && next;
+	$dammode && ($seqO_->write_seq(Bio::Seq->new(-seq => damage($seq_->seq,$damweight,$damdecay,$baseline,$V) , -display_id => $seq_->display_id."_SimWreck"))) && next;
 	$V && print STDERR "Length of " , $seq_->display_id , ": " , $seq_->length , "\n";
 	$totlength += $seq_->length;
 	if (! defined $smallestlength || $seq_->length < $smallestlength)
