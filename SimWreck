@@ -54,7 +54,7 @@ ARGUMENTS:	[interval] (default)	Desription
     
     Plot Funtion
     
-    -P 					Plot mode.
+    -P 					Plot mode. Plots the shape of the beta distribution requested by parameters -s, -S, -, and -M.
     -a 		[0,+inf) (120)		Plot width in characters.
     -u 		[0,+inf) (45)		Plot height in characters.
 
@@ -85,7 +85,7 @@ ARGUMENTS:	[interval] (default)	Desription
     my $dammode;
     my $baseline;
     my $frprop;
-    my $V;
+    my $V = 0;
     my $VV = 0; #sneaky report var for working on this
     my $up;
     my $across;
@@ -125,7 +125,8 @@ ARGUMENTS:	[interval] (default)	Desription
 	
     print STDERR "\nBeginning SimWreck with these parameters:\nInput file: $infile\nShape: $shape\n# reads: $ntot\nScale: $scale\nMin: $minlength\nMax: $maxlength\nBreakratio: $nPu_vs_nPy\nDamage weight: $damweight\nDamage decay: $damdecay\nDamage baseline: $baseline\nProportion plus strand: $frprop\n";
     ($dammode) ? print STDERR "Mode: damage-only\n\n" : print STDERR "Mode: Standard\n\n" ;
-    $paramchangeflag && print STDERR "WARNING: Parameters altered or set automatically to default values\n";
+    $paramchangeflag && print STDERR "WARNING: Parameters altered or set automatically to default values.\n";
+    ( $nPu_vs_nPy < 1 ) && print STDERR "WARNING: Values of -p less than 1 don\'t make much biological sense.\n";
     
     #output factory
     
@@ -152,7 +153,6 @@ ARGUMENTS:	[interval] (default)	Desription
 	    $smallestlength = $seq_->length;
 	    $V && print STDERR "Smallest length: $smallestlength\n";
 	}
-	
     }
     $dammode && (print "Program Completed\n") && exit;
     #exit;
@@ -235,7 +235,7 @@ ARGUMENTS:	[interval] (default)	Desription
 			$V && $starts_pu[0] && $starts_pu[1] && print STDERR "\t ... and it's a startpoint. Next is at $starts_pu[1].\n";
 			
 			$V && print STDERR "Guaranteed inclusion: " , @seqarray[($i+1) .. ($i+$minlength)] , "\n";
-			my $length = get_length($nPu_vs_nPy , $shape , $scale , $minlength , $maxlength , $V , @seqarray[($i+1+$minlength) .. ($i+1+$maxlength)]);
+			my $length = get_length($nPu_vs_nPy , $shape , $scale , $minlength , $maxlength , $V , [@seqarray[($i+1+$minlength) .. ($i+1+$maxlength)]]);
 			$V && print STDERR "Length: $length\n";
 			++$nreads;
 			my $id;
@@ -262,13 +262,13 @@ ARGUMENTS:	[interval] (default)	Desription
 			$V && $starts_py[0]  && $starts_py[1] && print STDERR "\t ... and it's a startpoint. Next is at $starts_py[1].\n";
 			
 			$V && print STDERR "Guaranteed inclusion: " , @seqarray[($i+1) .. ($i+$minlength)] , "\n";
-			my $length = get_length($nPu_vs_nPy , $shape , $scale , $minlength , $maxlength , $V , @seqarray[($i+1+$minlength) .. ($i+1+$maxlength)]);
+			my $length = get_length($nPu_vs_nPy , $shape , $scale , $minlength , $maxlength , $V , [@seqarray[($i+1+$minlength) .. ($i+1+$maxlength)]]);
 			$V && print STDERR "Length: $length\n";
 			++$nreads;
 			my $id;
 			($seq_->display_id) ? ($id = $seq_->display_id) : ($id = 'NO_ID');
 			$V && print "Into Damage: " , join ('',@seqarray[($i+1)..($i+1+$length)]) , "\n";
-			my $frag_ = Bio::Seq->new(-seq => damage(join('',@seqarray[($i+1)..($i+$length)]),$damweight,$damdecay,$baseline,$V) , -display_id => $id."_SimAnc_".$nreads);
+			my $frag_ = Bio::Seq->new(-seq => damage(join('',@seqarray[($i+1)..($i+$length)]),$damweight,$damdecay,$baseline,$V) , -display_id => $id."_SimWreck_".$nreads);
 			$seqO_->write_seq($frag_);
 			$V && print STDERR "Reads so far: $nreads\n";
 			if ((defined $starts_py[1]) && ($starts_py[0] == $starts_py[1]))
@@ -304,12 +304,8 @@ ARGUMENTS:	[interval] (default)	Desription
 
 	my @scores;
 	my $totscore;
-	my $nPu_vs_nPy = shift;
-	my $shape = shift;
-	my $scale = shift;
-	my $minlength = shift;
-	my $maxlength = shift;
-	my $V = shift;
+	my ($nPu_vs_nPy,$shape,$scale,$minlength,$maxlength,$V) = @_[0..5];
+	@_ = @{$_[6]};
 	my $i = 0;
 	
 	$V && print STDERR "Building prob dist for the region in which a break may occur: @_\n";
@@ -404,8 +400,7 @@ ARGUMENTS:	[interval] (default)	Desription
     
     sub rc ##################################################################################################################################################################################################################################################################################
     {
-       my $seq = $_[0];
-       $V = $_[1];
+       my ($seq, $V) = @_;
        $V && print STDERR "Returning rc from rc subroutine\n";
        $seq =~ tr/ACGTNRYSWKMBDHV/TGCANYRSWMKVHDB/;
        return join '' , reverse ( split '' , $seq);
@@ -413,7 +408,6 @@ ARGUMENTS:	[interval] (default)	Desription
     
     sub plot_beta ##################################################################################################################################################################################################################################################################################
     {
-	my $v = 1;
 	my ($shape , $scale , $minlength , $maxlength , $displen_h , $displen_v) = @_;
     
 	my @cols;
