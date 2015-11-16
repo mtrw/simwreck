@@ -23,11 +23,11 @@ Face the STDOUT and prepare to catch your sequences.
 ______________________________
 
 
-SYNOPSIS:	GenWreck -i genome.fasta
-		Genwreck -X -i Sanger_seq.fasta #implement DAMAGE ONLY MODE#################################################################################################################
-		GenWreck -i genome.fasta -n 10000 -s 2 -S 8 -m 100 -M 450 -p 2.2 -d .8 -D .2
+SYNOPSIS:	SimWreck -i genome.fasta
+		SimWreck -X -i Sanger_seq.fasta
+		SimWreck -i genome.fasta -n 10000 -s 2 -S 8 -m 100 -M 450 -p 2.2 -d .8 -D .2
 		#with GNU parallel
-		parallel 'echo {/.}; GenWreck {} > out_data/{/.}_simanc.fa ; echo ;' ::: data/*
+		parallel 'echo {/.}; SimWreck {} > out_data/{/.}_simanc.fa ; echo ;' ::: data/*
 		
 ARGUMENTS:	[interval] (default)	Desription
     
