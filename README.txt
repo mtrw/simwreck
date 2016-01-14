@@ -79,3 +79,11 @@ Now set the number of reads (-n) and specify the input genome (-i). Redirect std
 SimWreck produces reads that overlap the ends of the reference as well as those that fall entirely within it. When a read overlaps an end, the unknown nucleotides are assigned “N” - so if you’ve requested high coverage (or given a very short reference sequence), a portion of the reads will be N-heavy.
 
 Perhaps you’d like to see whether your analysis results would change if your reads had more deamination damage. In this case, use the -X flag. You may set the deamination parameters -d, -D, and -p, and give the program your reads with -i. Deamination will be applied according to the described profile.
+
+
+Try, using the test file testseq.fasta:
+SimWreck -i testseq.fasta
+SimWreck -i testseq.fasta -n1000 -d.3 -D.4 -s4 -S12 -m20 -M180 -p2 -b.02
+SimWreck -i testseq.fasta -n1000 -d.3 -D.4 -b.02 -X
+
+

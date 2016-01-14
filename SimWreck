@@ -1,11 +1,12 @@
 #!/usr/bin/perl
 
+
 use strict;
 use warnings;
 use Data::Dumper;
 use Getopt::Std;
-use IO::Compress::Gzip;
-use IO::Uncompress::Gunzip;
+#use IO::Compress::Gzip;
+#use IO::Uncompress::Gunzip;
 use Bio::SeqIO;
 
     #THIS CODE WON'T LOOK RIGHT IN SOME IDEs. IT WILL MAKE THE INDENTATION RUBBISH. USE KOMODO OR VIM?
@@ -127,59 +128,41 @@ ARGUMENTS:	[interval] (default)	Desription
  	(($baseline =~ /^\d*\.?\d*$/) && ($baseline >= 0) && ($baseline <= $damweight)) || die "\nERROR: Deamination baseline parameter must be from 0 and the damage weight ($damweight).\n";
     
     #preamble when run
-    #print STDERR "\nBeginning SimWreck with these parameters:\nInput file: $infile\nShape: $shape\n# reads: $ntot\nScale: $scale\nMin: $minlength\nMax: $maxlength\nBreakratio: $nPu_vs_nPy\nDamage weight: $damweight\nDamage decay: $damdecay\nDamage baseline: $baseline\nProportion plus strand: $frprop\n";
-    #($dammode) ? print STDERR "Mode: damage-only\n\n" : print STDERR "Mode: Standard\n\n" ;
-    #$paramchangeflag && print STDERR "WARNING: Parameters altered or set automatically to default values.\n";
-    #( $nPu_vs_nPy < 1 ) && print STDERR "WARNING: Values of -p less than 1 don\'t make much biological sense.\n";
-    
-    #set up file parsing
-    my %fn = %{parse_filename($infile)};
-    my $fq = 0; #flag if it's a fastq
-    my $seqI_;
-    my $seqO_;
-    if ($fn{'ext'} =~ /fastq$|fq$/)
-    {
-	print "It\'s fastq!\n";
-	$fq = 1;
-	$seqI_ = Bio::SeqIO->new(-file => $infile , -format => 'fastq');
-    	$seqO_ = Bio::SeqIO->new(-fh => \*STDOUT , -format => 'fastq');
-    }
-    elsif ($fn{'ext'} =~ /fastq\.gz$|fq\.gz$/)
-    {
-	$fq = 1;
-	print "It\'s gzipped fastq!\n";
-	$seqI_ = Bio::SeqIO->new(-file => "gunzip -c $infile |" , -format => 'fastq');
-	$seqO_ = Bio::SeqIO->new(-fh => \*STDOUT , -format => 'fastq');
-    }
-    elsif ($fn{'ext'} =~ /fasta$|fa$/)
-    {
-	print "It\'s fasta!\n";
-	$seqI_ = Bio::SeqIO->new(-file => $infile , -format => 'fasta');
-	$seqO_ = Bio::SeqIO->new(-fh => \*STDOUT , -format => 'fasta');
-    }
-    else
-    {
-	die "Could not recognise file extension \"$fn{'ext'}\" from input file\n";
-    }
-    
-    
+    print STDERR "\nBeginning SimWreck with these parameters:\nInput file: $infile\nShape: $shape\n# reads: $ntot\nScale: $scale\nMin: $minlength\nMax: $maxlength\nBreakratio: $nPu_vs_nPy\nDamage weight: $damweight\nDamage decay: $damdecay\nDamage baseline: $baseline\nProportion plus strand: $frprop\n";
+    ($dammode) ? print STDERR "Mode: damage-only\n\n" : print STDERR "Mode: Standard\n\n" ;
+    $paramchangeflag && print STDERR "WARNING: Parameters altered or set automatically to default values.\n";
+    ( $nPu_vs_nPy < 1 ) && print STDERR "WARNING: Values of -p less than 1 don\'t make much biological sense.\n";
+
+
+
 
 ########################################### GUTS ###################################################
     
+    my ($seqI_,$seqO_,$fq) = factory_factory($infile); #initiate bioperl factories for first pass
 
     #first pass to get lengths
     my $totlength = 0;
     my $smallestlength;
+    my @lengths;
     while (my $seq_ = $seqI_->next_seq)
     {
 	if ($dammode)
 	{
-	    my $frag_ = Bio::Seq->new(-seq => damage($seq_->seq,$damweight,$damdecay,$baseline,$V) , -display_id => $seq_->display_id."_SimWreck");
-	    print Dumper $seq_->qual; exit;
-	    ($fq) && ($frag_->qual = $seq_->qual);
-	    $seqO_->write_seq($frag_);
+	    	if ($fq)
+		{
+			$seq_->seq(damage($seq_->seq,$damweight,$damdecay,$baseline,$V)); #damage the sequence
+			$seq_->display_id($seq_->display_id."_SimWreck");
+			$seqO_->write_seq($seq_);
+		}
+		else
+		{
+			$seqO_->write_seq(Bio::Seq->new(-seq => damage($seq_->seq,$damweight,$damdecay,$baseline,$V) , -display_id => $seq_->display_id."_SimWreck"))
+		}
 	    next; #if in damage mode, just deaminate the sequence and spit it back out
 	}
+	
+#	push @lengths , $seq_->length;
+
 	$totlength += $seq_->length;
 	if (! defined $smallestlength || $seq_->length < $smallestlength)
 	{
@@ -188,36 +171,72 @@ ARGUMENTS:	[interval] (default)	Desription
     }
     $dammode && (print STDERR "Program Completed\n") && exit;
     
+#    print "lengths: @lengths\n";
+#    my @initnreadsperseq;
+#    foreach (@lengths)
+#    {
+#	push @initnreadsperseq , nint(($_/$totlength) * $ntot * $frprop ) + nint(($_/$totlength) * $ntot*(1-$frprop));
+#    }
+#    print "counts per read: @initnreadsperseq\n";
+#    
+    
     
     ($maxlength > $smallestlength) && print STDERR "WARNING: Some contigs shorter than largest expected reads: expect possible excessive mostly-N reads from these contigs\n";
-    
-    
-    $seqI_ = Bio::SeqIO->new(-file => $infile , -format => 'fasta'); #reload file for second pass
-    
+    undef $seqI_;
+    ($seqI_,$seqO_,$fq) = factory_factory($infile); #reload factories for second pass
+   
+
+############################# LOOK SHARP, WE'RE IN CHARGE OF THE LENGTH DISTRIBUTION ##########################################################################################################################################################################################################################
+
     my $nreads = 0; #counter
+
     while (my $seq_ = $seqI_->next_seq) #per reference sequence
     {
-	#this 2-element array (if frprop not altered): ([n_reads_required_this_Sequence/2,forward sequence],[n_reads_required_this_Sequence/2,reverse comp sequence]). first element generates half the reads on the forward strand, second produces other half in reverse. f/r proportion altered by $frprop.
-	for ( [ nint((($seq_->length)/$totlength) * $ntot*$frprop) , $seq_->seq ] , [ nint((($seq_->length)/$totlength) * $ntot*(1-$frprop)) , rc($seq_->seq) ] ) 
+	
+	#this 2-element array (if frprop not altered): ([n_reads_required_this_Sequence/2,forward sequence],[n_reads_required_this_Sequence/2,reverse comp sequence]). first element generates half the reads on the forward strand, second produces other half in reverse. f/r proportion altered by $frprop (set by default to .5)
+	for ( [ nint((($seq_->length)/$totlength) * $ntot*$frprop) , $seq_->seq , 0 ] , [ nint((($seq_->length)/$totlength) * $ntot*(1-$frprop)) , rc($seq_->seq) , 1 ] ) 
 	{
-	    my ($n,$seq) = @$_;
+
+	    my ($n,$seq,$rc) = @$_;
+	    #print STDERR "Demanding $n reads\n";
+	    my $realpu = 0;
+	    my $realpy = 0;
+	    my $repeathits = 0;
+	    my $nostart = 0;
+	    #$rc ? #print STDERR "We're making RC reads\n" : print "Making forward reads\n";
 	    
-	    for (1..$maxlength) #add Ns to facilitate the end-overlapping reads
+	    my @quals;
+	    if($fq) 
+	    {
+		##print STDERR "Quals:\t\t\t" , (join "-" , @{$seq_->qual}) , "\n";
+		if ($rc) {@quals = reverse @{$seq_->qual}; print "Reversed it!\n"} #reverse qualities array if we're doing the minus strand
+		else {@quals = @{$seq_->qual}}
+		##print STDERR "becomes/remains:\t" , (join "-" , @quals) , "\n";
+	    }
+	    
+	    for (1..$maxlength) #add Ns and quality scores of 0 to facilitate the end-overlapping reads
 	    {
 		$seq .= 'N';
+		($fq) && push @quals , 0
 	    }
+	    #print "Quals, added:\t" , (join "-" , @quals) , "\n";
+	    
+	    
 	    my $seqlength = length $seq;
-	    
+	    ##print STDERR " lengths seq,qual:\n" , length $seq , "\n" , scalar @quals, "\n\n";	   
+
 	    ($seq =~ s/(?![AGCTagct])/N/) && ($illegalflag = 1); #change bad nucleotides and trigger warning
-	    
+
 	    #count purines and pyramidines
 	    my $nPu = $seq =~ tr/[AaGg]//;
-	    my $nPy = $seqlength - $seq =~ tr/[Nn]// - $nPu;
-	    
+	    my $nPy = $seq =~ tr/[TtCc]//;
+
 	    #calculate how many reads should start at each
 	    my $nPu_breaks = nint((($nPu_vs_nPy*($nPu/$nPy))*$n)/(1+($nPu_vs_nPy*($nPu/$nPy))));
 	    my $nPy_breaks = $n - $nPu_breaks;
 	    
+	    #print STDERR "Total breaks added: " , $nPu_breaks+$nPy_breaks , "\n";
+
 	    #initialise and populate arrays of startpoints
 	    my @starts_pu;
 	    my @starts_py;
@@ -230,61 +249,70 @@ ARGUMENTS:	[interval] (default)	Desription
 		push @starts_py , int(rand ($nPy))
 	    }
 	    @starts_py = sort {$a <=> $b} @starts_py; @starts_pu = sort {$a <=> $b} @starts_pu;
-	    
+
 	    #we're going to place reads on the sequence, so we need to count pur/pyrimidines as we go
 	    my $pucount = -1; #set up counts, first hit will increment making this a sensible zero-based count
 	    my $pycount = -1;
 	    my @seqarray = split '' , $seq; #put seq in an array to make random access fast
 	    for ( my $i = 0 ; $i <= $seqlength-$maxlength ; ++$i ) #scan the sequence itself
 	    {
+		#print STDERR "i: $i\nArrays: \n" , join ("-" , @starts_pu ), " == " ,  scalar @starts_pu , "\n" , join ("-" , @starts_py) ," == " ,  scalar @starts_py ,  "\n";
 		if ($seqarray[$i] =~ /[AaGg]/)
 		{
 		    ++$pucount;
-		    if ( (defined $starts_pu[0]) && ($pucount == $starts_pu[0])) #if we had decided to start a read at this purine
+		    #print STDERR "$pucount th of $nPu purines\n";
+		    if ( (defined $starts_pu[0]) && ($pucount == $starts_pu[0])) #if there are still reads left to generate, and we had decided to start a read at this purine
 		    {
 			my $length = get_length($nPu_vs_nPy , $shape , $scale , $minlength , $maxlength , $V , [@seqarray[($i+1+$minlength) .. ($i+1+$maxlength)]]); #define the distribution over possible read lengths and draw from it
 			++$nreads;
 			
-			#set up bioseq output object -id
+			#set up id
 			my $id;
 			($seq_->display_id) ? ($id = $seq_->display_id) : ($id = 'NO_ID');
-			#feed subsection of seq array representing read into damage (deamination) sub, plug result into bioseq output object -seq
-			my $frag_ = Bio::Seq->new(-seq => damage(join('',@seqarray[($i+1)..($i+$length)]),$damweight,$damdecay,$baseline,$V) , -display_id => $id."_SimWreck_".$nreads); #what a mouthful
-			
+			my $frag_ = makefrag($fq,$seq_,$i,$length,\@seqarray,$damweight,$damdecay,$baseline,$V,$id,$nreads,\@quals);
 			$seqO_->write_seq($frag_);
+			++$realpu;
+
 			if ((defined $starts_pu[1]) && ($starts_pu[0] == $starts_pu[1])) #check we might have another read starting here
 			{
+			    ++$repeathits;
 			    --$pucount;
 			    --$i;
 			}
 			shift @starts_pu; #that's it for this startpos, take it off the list.
 		    }
 		}
-		elsif ($seqarray[$i] =~ /[TtCc]/) #as above but for pyrimidines
+		elsif ($seqarray[$i] =~ /[TtCc]/) #as above but for pyrimidines.
 		{
 		    ++$pycount;
-		    if ((defined $starts_py[0]) && ($pycount == $starts_py[0]))
+		    #print STDERR "$pycount th of $nPy purines\n";
+		    if ( (defined $starts_py[0]) && ($pycount == $starts_py[0]))
 		    {
 			my $length = get_length($nPu_vs_nPy , $shape , $scale , $minlength , $maxlength , $V , [@seqarray[($i+1+$minlength) .. ($i+1+$maxlength)]]);
 			++$nreads;
 			my $id;
 			($seq_->display_id) ? ($id = $seq_->display_id) : ($id = 'NO_ID');
-			my $frag_ = Bio::Seq->new(-seq => damage(join('',@seqarray[($i+1)..($i+$length)]),$damweight,$damdecay,$baseline,$V) , -display_id => $id."_SimWreck_".$nreads);
+			my $frag_ = makefrag($fq,$seq_,$i,$length,\@seqarray,$damweight,$damdecay,$baseline,$V,$id,$nreads,\@quals);
 			$seqO_->write_seq($frag_);
+			++$realpy;
+
 			if ((defined $starts_py[1]) && ($starts_py[0] == $starts_py[1]))
 			{
+			    ++$repeathits;
 			    --$pycount;
 			    --$i;
 			}
 			shift @starts_py;
 		    }
 		}
+		#else {++$nostart;}
 	    }
+	    #print STDERR "Pus real:\t$realpu\nPys real:\t$realpy\nTotal real:\t" , $realpu+$realpy , "\nRepeats:\t$repeathits\nNostart:\t$nostart\n\n";
 	}
     }
     
-    $illegalflag && print STDERR "WARNING: Non-AGTC nucleotides in at least one sequence changed to Ns.\n";
-    print STDERR "Program completed\n";
+    $illegalflag && #print STDERR "WARNING: Non-AGTC nucleotides in at least one sequence changed to Ns.\n";
+    #print STDERR "Program completed\n";
     
     exit;
     
@@ -370,7 +398,7 @@ ARGUMENTS:	[interval] (default)	Desription
     sub rc ##################################################################################################################################################################################################################################################################################
     {
        my ($seq, $V) = @_;
-       $V && print STDERR "Returning rc from rc subroutine\n";
+       $V && #print STDERR "Returning rc from rc subroutine\n";
        $seq =~ tr/ACGTNRYSWKMBDHV/TGCANYRSWMKVHDB/;
        return join '' , reverse ( split '' , $seq);
     }
@@ -478,6 +506,69 @@ ARGUMENTS:	[interval] (default)	Desription
                 return { 'path' => '' , 'name' => $_ , 'ext' => '' };
         }
     }
+ #set up bioperl factories 
+sub factory_factory ######################################################################################################################################################################################################################################################################################################################################################################################################################################################################
+{    
+    my %fn = %{parse_filename(shift)};
+    my $fq = 0; #flag if it's a fastq
+    my $seqI_;
+    my $seqO_;
+    if ($fn{'ext'} =~ /fastq$|fq$/)
+    {
+	$fq = 1;
+	$seqI_ = Bio::SeqIO->new(-file => $infile , -format => 'fastq');
+    	$seqO_ = Bio::SeqIO->new(-fh => \*STDOUT , -format => 'fastq');
+    }
+    elsif ($fn{'ext'} =~ /fastq\.gz$|fq\.gz$/)
+    {
+	$fq = 1;
+	close IN;
+	open(IN,"gzip -cd $infile |");
+	$seqI_ = Bio::SeqIO->new(-fh => \*IN , -format => 'fastq');
+	$seqO_ = Bio::SeqIO->new(-fh => \*STDOUT , -format => 'fastq');
+    }
+    elsif ($fn{'ext'} =~ /fasta$|fa$/)
+    {
+	$seqI_ = Bio::SeqIO->new(-file => $infile , -format => 'fasta');
+	$seqO_ = Bio::SeqIO->new(-fh => \*STDOUT , -format => 'fasta');
+    }
+    else
+    {
+	die "Could not recognise file extension \"$fn{'ext'}\" from input file\n";
+    }
+	return ($seqI_,$seqO_,$fq);
+}
     
-    
-    __END__
+#make a bioperl sequence object as appropriate
+sub makefrag ####################################################################################################################################################################################################################################################################################################################################################################################################################################################################################################################################################
+{	
+	my ($fq,$seq_,$i,$length,$saref,$damweight,$damdecay,$baseline,$V,$id,$nreads,$qref) = @_;
+	my $frag_;
+	my @seqarray = @$saref;
+	my @quals;
+	($fq) && (@quals = @$qref);
+	if ($fq)
+	{
+		$frag_ = Bio::Seq::Quality->new
+		(     
+			-qual => [@quals[($i+1)..($i+$length)]],
+                     	-seq =>  damage(join('',@seqarray[($i+1)..($i+$length)]),$damweight,$damdecay,$baseline,$V), #feed subsection of seq array representing read into damage (deamination) sub, plug result into bioseq output object -seq
+                      	-id  => $id."_SimWreck_".$nreads
+                );
+	}
+	else
+	{
+		$frag_ = Bio::Seq->new
+		(
+			-seq => damage(join('',@seqarray[($i+1)..($i+$length)]),$damweight,$damdecay,$baseline,$V),
+			-display_id => $id."_SimWreck_".$nreads
+		);
+	}
+	$frag_;
+}
+
+
+
+
+
+		        __END__
