@@ -1,5 +1,4 @@
-#!/usr/bin/perl
-
+#!/usr/bin/env perl
 
 use strict;
 use warnings;
@@ -32,34 +31,39 @@ SYNOPSIS:	SimWreck -i genome.fasta
 		#with GNU parallel
 		parallel 'echo {/.}; SimWreck {} > out_data/{/.}_simanc.fa ; echo ;' ::: data/*
 		
-ARGUMENTS:	[interval] (default)	Desription
+ARGUMENTS:	    [interval](default)	    Desription
     
     General
     
-    -i 					Genome file to make reads from, in fasta format.
-    -n		[1,+inf) (10000)	Number of reads desired.
-    -r 		[0,1] (.5)		Proportion of minus strand reads.    
-    -X					Damage-only mode. Returns each input sequence whole, with damage added as per any damage parameters specified.
+    -i 					                Genome file to make reads from, in fasta format.
+    -n		[1,+inf) (10000)	        Number of reads desired.
+    -r 		[0,1] (.5)		            Proportion of minus strand reads.    
+    -X					                Damage-only mode. Returns each input sequence whole,
+                                        with damage added as per any damage parameters specified.
 
     Size distribution
     
-    -s 		(0,+inf) (4)		Shape parameter (alpha).
-    -S 		(0,+inf) (4)		Scale parameter (beta).
-    -m 		[0,+inf) (80)		Nucleotide length at left end of beta distribution.
-    -M 		(0,+inf) (280)		Nucleotide length at right end of beta distribution.
+    -s 		(0,+inf) (4)	        	Shape parameter (alpha).
+    -S 		(0,+inf) (4)	        	Scale parameter (beta).
+    -m 		[0,+inf) (80)	        	Nucleotide length at left end of beta distribution.
+    -M 		(0,+inf) (280)	        	Nucleotide length at right end of beta distribution.
     
     Damage
     
-    -p 		[0,+inf) (3)		Depurination weight parameter. Ratio of nicks that occur 3' of a purine:3' of a pyrimidine. (e.g. at 2, it is twice as likely that a strand will begin or end with a purine).
-    -d 		[0,+inf) (.3)		Deamination weight parameter, influencing how frequently deamination results in pseudomutations.
-    -D 		[0,+inf) (.5)		Deamination decay parameter, influencing how the rate of deamination decays further from the ends of the sequence.
-    -b 		[0,-d] (.01)		Baseline rate of deamination.
+    -p 		[0,+inf) (3)	        	Depurination weight parameter. Ratio of nicks that occur 3' of a purine:3' of a pyrimidine.
+                                        (e.g. at 2, it is twice as likely that a strand will begin or end with a purine).
+    -d 		[0,+inf) (.3)	        	Deamination weight parameter, influencing how frequently
+                                        deamination results in pseudomutations.
+    -D 		[0,+inf) (.5)	        	Deamination decay parameter, influencing how the rate of deamination
+                                        decays further from the ends of the sequence.
+    -b 		[0,-d] (.01)	        	Baseline rate of deamination.
     
     Plot Funtion
     
-    -P 					Plot mode. Plots the shape of the beta distribution requested by parameters -s, -S, -, and -M.
-    -a 		[0,+inf) (120)		Plot width in characters.
-    -u 		[0,+inf) (45)		Plot height in characters.
+    -P 					                Plot mode. Plots the shape of the beta distribution requested
+                                        by parameters -s, -S, -, and -M.
+    -a 		[0,+inf) (120)		        Plot width in characters.
+    -u 		[0,+inf) (45)		        Plot height in characters.
 
 ";
 
@@ -171,15 +175,6 @@ ARGUMENTS:	[interval] (default)	Desription
     }
     $dammode && (print STDERR "Program Completed\n") && exit;
     
-#    print "lengths: @lengths\n";
-#    my @initnreadsperseq;
-#    foreach (@lengths)
-#    {
-#	push @initnreadsperseq , nint(($_/$totlength) * $ntot * $frprop ) + nint(($_/$totlength) * $ntot*(1-$frprop));
-#    }
-#    print "counts per read: @initnreadsperseq\n";
-#    
-    
     
     ($maxlength > $smallestlength) && print STDERR "WARNING: Some contigs shorter than largest expected reads: expect possible excessive mostly-N reads from these contigs\n";
     undef $seqI_;
@@ -196,7 +191,6 @@ ARGUMENTS:	[interval] (default)	Desription
 	#this 2-element array (if frprop not altered): ([n_reads_required_this_Sequence/2,forward sequence],[n_reads_required_this_Sequence/2,reverse comp sequence]). first element generates half the reads on the forward strand, second produces other half in reverse. f/r proportion altered by $frprop (set by default to .5)
 	for ( [ nint((($seq_->length)/$totlength) * $ntot*$frprop) , $seq_->seq , 0 ] , [ nint((($seq_->length)/$totlength) * $ntot*(1-$frprop)) , rc($seq_->seq) , 1 ] ) 
 	{
-
 	    my ($n,$seq,$rc) = @$_;
 	    #print STDERR "Demanding $n reads\n";
 	    my $realpu = 0;
@@ -209,7 +203,7 @@ ARGUMENTS:	[interval] (default)	Desription
 	    if($fq) 
 	    {
 		##print STDERR "Quals:\t\t\t" , (join "-" , @{$seq_->qual}) , "\n";
-		if ($rc) {@quals = reverse @{$seq_->qual}; print "Reversed it!\n"} #reverse qualities array if we're doing the minus strand
+		if ($rc) {@quals = reverse @{$seq_->qual}} #reverse qualities array if we're doing the minus strand
 		else {@quals = @{$seq_->qual}}
 		##print STDERR "becomes/remains:\t" , (join "-" , @quals) , "\n";
 	    }
@@ -254,7 +248,12 @@ ARGUMENTS:	[interval] (default)	Desription
 	    my $pucount = -1; #set up counts, first hit will increment making this a sensible zero-based count
 	    my $pycount = -1;
 	    my @seqarray = split '' , $seq; #put seq in an array to make random access fast
-	    for ( my $i = 0 ; $i <= $seqlength-$maxlength ; ++$i ) #scan the sequence itself
+	    
+
+########## THAT'S ALL THE BACKGROUND WE NEED. MAKE THE READS ##############
+
+
+        for ( my $i = 0 ; $i <= $seqlength-$maxlength ; ++$i ) #scan the sequence itself
 	    {
 		#print STDERR "i: $i\nArrays: \n" , join ("-" , @starts_pu ), " == " ,  scalar @starts_pu , "\n" , join ("-" , @starts_py) ," == " ,  scalar @starts_py ,  "\n";
 		if ($seqarray[$i] =~ /[AaGg]/)
@@ -269,7 +268,7 @@ ARGUMENTS:	[interval] (default)	Desription
 			#set up id
 			my $id;
 			($seq_->display_id) ? ($id = $seq_->display_id) : ($id = 'NO_ID');
-			my $frag_ = makefrag($fq,$seq_,$i,$length,\@seqarray,$damweight,$damdecay,$baseline,$V,$id,$nreads,\@quals);
+			my $frag_ = makefrag($fq,$seq_,$i,$length,\@seqarray,$damweight,$damdecay,$baseline,$V,$id,$nreads,$rc,\@quals);
 			$seqO_->write_seq($frag_);
 			++$realpu;
 
@@ -292,7 +291,7 @@ ARGUMENTS:	[interval] (default)	Desription
 			++$nreads;
 			my $id;
 			($seq_->display_id) ? ($id = $seq_->display_id) : ($id = 'NO_ID');
-			my $frag_ = makefrag($fq,$seq_,$i,$length,\@seqarray,$damweight,$damdecay,$baseline,$V,$id,$nreads,\@quals);
+			my $frag_ = makefrag($fq,$seq_,$i,$length,\@seqarray,$damweight,$damdecay,$baseline,$V,$id,$nreads,$rc,\@quals);
 			$seqO_->write_seq($frag_);
 			++$realpy;
 
@@ -305,9 +304,7 @@ ARGUMENTS:	[interval] (default)	Desription
 			shift @starts_py;
 		    }
 		}
-		#else {++$nostart;}
 	    }
-	    #print STDERR "Pus real:\t$realpu\nPys real:\t$realpy\nTotal real:\t" , $realpu+$realpy , "\nRepeats:\t$repeathits\nNostart:\t$nostart\n\n";
 	}
     }
     
@@ -542,18 +539,19 @@ sub factory_factory ############################################################
 #make a bioperl sequence object as appropriate
 sub makefrag ####################################################################################################################################################################################################################################################################################################################################################################################################################################################################################################################################################
 {	
-	my ($fq,$seq_,$i,$length,$saref,$damweight,$damdecay,$baseline,$V,$id,$nreads,$qref) = @_;
+	my ($fq,$seq_,$i,$length,$saref,$damweight,$damdecay,$baseline,$V,$id,$nreads,$rc,$qref) = @_;
 	my $frag_;
 	my @seqarray = @$saref;
 	my @quals;
 	($fq) && (@quals = @$qref);
+    ($rc) ? ($rc = '_rc') : ($rc = '');
 	if ($fq)
 	{
 		$frag_ = Bio::Seq::Quality->new
 		(     
 			-qual => [@quals[($i+1)..($i+$length)]],
                      	-seq =>  damage(join('',@seqarray[($i+1)..($i+$length)]),$damweight,$damdecay,$baseline,$V), #feed subsection of seq array representing read into damage (deamination) sub, plug result into bioseq output object -seq
-                      	-id  => $id."_SimWreck_".$nreads
+                      	-id  => $id."_SimWreck_".$nreads."_".($i+1).$rc
                 );
 	}
 	else
@@ -561,7 +559,7 @@ sub makefrag ###################################################################
 		$frag_ = Bio::Seq->new
 		(
 			-seq => damage(join('',@seqarray[($i+1)..($i+$length)]),$damweight,$damdecay,$baseline,$V),
-			-display_id => $id."_SimWreck_".$nreads
+			-display_id => $id."_SimWreck_".$nreads."_".($i+1).$rc
 		);
 	}
 	$frag_;

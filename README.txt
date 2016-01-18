@@ -9,6 +9,8 @@ ______________________________
 An aDNA read simulator for testing analysis pipelines.
 Give it a genome and describe to it what condition the reads will be in.
 Face the STDOUT and prepare to catch your sequences.
+
+SimWreck requires Bioperl (http://www.bioperl.org/wiki/Installing_BioPerl)
 ______________________________
 
 
@@ -67,19 +69,20 @@ You can change the size of the plot with -a (pixels across) and -u (up).
 … when satisfied with the curve, set the length range to your satisfaction by adjusting -m and -M.
 
 
-Once done, have a look at your MapDamage profile.
+Once done, have a look at the MapDamage profile of a libnrary you wish to emulate.
 To set the deamination parameters, look at the deamination frequency curves.
 The intercept with the y-axis can be entered as -d.
-If the curve “bottoms out” at a particular value, enter it as -b.
+If the curve “bottoms out” at a particular value, enter it with -b.
 The rate at which the curve decays from -d to -b is influenced by -D (higher=decaying faster). Default is usually pretty good, but values from .1 to 2 cover the range seen in most empirical damage profiles.
-To set the deprivation, compare the frequency of C/T to that of A/G at they first position before/after the reads. Work out the purine:pyrimidine ratio (i.e. if it’s 70% A/G and 30% C/T, the ratio is .7/.3 ~= 2.3) and enter it as -p.
+To set the depurination, compare the frequency of C/T to that of A/G at they first position before/after the reads. Work out the purine:pyrimidine ratio (i.e. if it’s 70% A/G and 30% C/T, the ratio is .7/.3 ~= 2.3) and enter it as -p.
 
 Now set the number of reads (-n) and specify the input genome (-i). Redirect stdout to a file and run the program.
 
 SimWreck produces reads that overlap the ends of the reference as well as those that fall entirely within it. When a read overlaps an end, the unknown nucleotides are assigned “N” - so if you’ve requested high coverage (or given a very short reference sequence), a portion of the reads will be N-heavy.
 
-Perhaps you’d like to see whether your analysis results would change if your reads had more deamination damage. In this case, use the -X flag. You may set the deamination parameters -d, -D, and -p, and give the program your reads with -i. Deamination will be applied according to the described profile.
+Perhaps you’d like to see whether your analysis results would change if your existent reads actually had more deamination damage than they already do. In this case, use the -X flag. You may set the deamination parameters -d, -D, and -p, and give the program your reads with -i. Deamination will be applied according to the described profile.
 
+SimWreck will recognise .fasta, .fa, .fastq, .fastq.gz, .fq.gz extensions, and will return fasta/q format depending on the input. The quality scores of returned reads are identical to those given in the reference.
 
 Try, using the test file testseq.fasta:
 SimWreck -i testseq.fasta
