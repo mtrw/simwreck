@@ -69,7 +69,7 @@ You can change the size of the plot with -a (pixels across) and -u (up).
 … when satisfied with the curve, set the length range to your satisfaction by adjusting -m and -M.
 
 
-Once done, have a look at the MapDamage profile of a libnrary you wish to emulate.
+Once done, have a look at the MapDamage profile of a library you wish to emulate.
 To set the deamination parameters, look at the deamination frequency curves.
 The intercept with the y-axis can be entered as -d.
 If the curve “bottoms out” at a particular value, enter it with -b.
