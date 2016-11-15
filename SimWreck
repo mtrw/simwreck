@@ -1,14 +1,15 @@
-#!/usr/bin/env perl
-
+#!/usr/bin/perl#
 use strict;
 use warnings;
 use Data::Dumper;
+#use feature "state";
 use Getopt::Std;
-#use IO::Compress::Gzip;
-#use IO::Uncompress::Gunzip;
-use Bio::SeqIO;
 
-    #THIS CODE WON'T LOOK RIGHT IN SOME IDEs. IT WILL MAKE THE INDENTATION RUBBISH. USE KOMODO OR VIM?
+
+
+
+
+
 
 #USAGE
 my $usage =
@@ -27,41 +28,45 @@ ______________________________
 
 SYNOPSIS:	SimWreck -i genome.fasta
 		SimWreck -X -i Sanger_seq.fasta
-		SimWreck -i genome.fasta -n 10000 -s 2 -S 8 -m 100 -M 450 -p 2.2 -d .8 -D .2
+		SimWreck -i genome.fasta -n 10000 -s 2 -S 8 -m 100 -M 450 -p .2 -d .8 -D .2
 		#with GNU parallel
-		parallel 'echo {/.}; SimWreck {} > out_data/{/.}_simanc.fa ; echo ;' ::: data/*
+		parallel 'echo {/.}; SimWreck -i {} > out_data/{/.}_simanc.fa ; echo ;' ::: data/*
 		
 ARGUMENTS:	    [interval](default)	    Desription
     
     General
     
-    -i 					                Genome file to make reads from, in fasta format.
+    -i 					        Genome file to make reads from, in fasta format.
     -n		[1,+inf) (10000)	        Number of reads desired.
-    -r 		[0,1] (.5)		            Proportion of minus strand reads.    
-    -X					                Damage-only mode. Returns each input sequence whole,
-                                        with damage added as per any damage parameters specified.
+    -r 		[0,1] (.5)		        Proportion of minus strand reads.
+    -X		                    Damage-only mode. Returns each input sequence whole,
+                                                with damage according to the deamination model added as per any damage parameters
+						specified. Optimal for short sequences only.
+    -Z		                    Uniform damage mode. Returns each input sequence whole,
+                                                with deamination signals applied uniformly across the sequence with frequency -d.
 
     Size distribution
     
-    -s 		(0,+inf) (4)	        	Shape parameter (alpha).
-    -S 		(0,+inf) (4)	        	Scale parameter (beta).
-    -m 		[0,+inf) (80)	        	Nucleotide length at left end of beta distribution.
-    -M 		(0,+inf) (280)	        	Nucleotide length at right end of beta distribution.
+    -s 		(0,+inf) (4)	        	Shape parameter (alpha). Increase to get a left-skewed distribution.
+    -S 		(0,+inf) (8)	        	Scale parameter (beta). Increase to get a right-skewed distribution.
+    -m 		[0,+inf) (25)	        	Nucleotide length at left end of beta distribution.
+    -M 		(0,+inf) (150)	        	Nucleotide length at right end of beta distribution.
     
     Damage
     
-    -p 		[0,+inf) (3)	        	Depurination weight parameter. Ratio of nicks that occur 3' of a purine:3' of a pyrimidine.
-                                        (e.g. at 2, it is twice as likely that a strand will begin or end with a purine).
+    -p 		(disabled)	                Depurination parameter. How much is the frequency of purines occurring before the 5'
+                                                ends of the reads elevated from the frequency of purines in the rest of the read, on
+						average? Leave unset to disable depurination and slightly increase speed.
     -d 		[0,+inf) (.3)	        	Deamination weight parameter, influencing how frequently
-                                        deamination results in pseudomutations.
+                                                deamination results in pseudomutations.
     -D 		[0,+inf) (.5)	        	Deamination decay parameter, influencing how the rate of deamination
-                                        decays further from the ends of the sequence.
+                                                decays further from the ends of the sequence.
     -b 		[0,-d] (.01)	        	Baseline rate of deamination.
     
     Plot Funtion
     
-    -P 					                Plot mode. Plots the shape of the beta distribution requested
-                                        by parameters -s, -S, -, and -M.
+    -P 					        Plot mode. Plots the shape of the beta distribution requested
+                                                by parameters -s, -S, -, and -M.
     -a 		[0,+inf) (120)		        Plot width in characters.
     -u 		[0,+inf) (45)		        Plot height in characters.
 
@@ -71,502 +76,522 @@ ARGUMENTS:	    [interval](default)	    Desription
 ! $ARGV[0] && (print STDERR $usage) && exit;
 
 #vars, params, args
-    
-    my $illegalflag = 0; #bad argument?
-    my $shortflag = 0; #short sequences present?
-    my $paramchangeflag = 0; #have I set any params to default?
-    my %opts;
-    
-    getopts('PVXhi:n:s:S:m:M:p:d:D:r:b:u:a:',\%opts);   
-    
-    ($opts{'h'} && print STDERR $usage) && exit;
-        
-    #initialisations, explained below
-    my $ntot;
-    my $shape;
-    my $scale;
-    my $minlength;
-    my $maxlength;
-    my $nPu_vs_nPy;
-    my $damweight;
-    my $damdecay;
-    my $dammode;
-    my $baseline;
-    my $frprop;
-    my $V = 0;
-    my $VV = 0; #sneaky report var for working on this
-    my $up;
-    my $across;
 
-    if ($opts{'n'}) { $ntot = $opts{'n'}} else {$ntot = 10000; $paramchangeflag = 1 } ; #n reads desired
-        (($ntot =~ /^\d*\.?\d*$/) && ($ntot > 0)) || die "\nERROR: Desired reads (-n) must be a number greater than 0\n";
-    if ($opts{'s'}) { $shape = $opts{'s'}} else {$shape = 4; $paramchangeflag = 1 } ; #shape param
-        (($shape =~ /^\d*\.?\d*$/) && ($shape > 0)) || die "\nERROR: Shape parameter (-s) must be a number greater than 0\n";
-    if ($opts{'S'}) { $scale = $opts{'S'}} else {$scale = 4; $paramchangeflag = 1 } ; #scale param
-        (($scale =~ /^\d*\.?\d*$/) && ($scale > 0)) || die "\nERROR: Scale parameter (-S) must be a number greater than 0\n";
-    if ($opts{'m'}) { $minlength = $opts{'m'}} else {$minlength = 80; $paramchangeflag = 1 } ; #Left end of beta distribution parameter
-        (($minlength =~ /^\d*\.?\d*$/) && ($minlength >= 0)) || die "\nERROR: Left end of beta distribution parameter (-m) must be a number greater than or equal to 0\n";
-    if ($opts{'M'}) { $maxlength = $opts{'M'}} else {$maxlength = 280; $paramchangeflag = 1 } ; #Right end of beta distribution parameter
-        (($maxlength =~ /^\d*\.?\d*$/) && ($maxlength > $minlength)) || die "\nERROR: Right end of beta distribution parameter (-M) must be a number greater than 0 and greater than left end (-m)\n";
-    if ($opts{'u'}) { $up = $opts{'u'}} else {$up = 45} ; #height of the ascii density plot in chars
-        (($up =~ /^\d*\.?\d*$/) && ($up > 5)) || die "\nERROR: Plot height (-u) must be a number greater than 4\n";
-    if ($opts{'a'}) { $across = $opts{'a'}} else {$across = 120} ; #width of the ascii density plot in chars
-        (($across =~ /^\d*\.?\d*$/) && ($across > 5)) || die "\nERROR: Plot width (-u) must be a number greater than 4\n";
-    if ($opts{'P'})
-    {
-	plot_beta($shape,$scale,$minlength,$maxlength,$across,$up); #routine in this script
-	exit;
-    }
-    ((my $infile = $opts{'i'}) && (-e $opts{'i'}) ) || (die "\nCheck input fasta file given with -i.\n"); #input file
-    if ($opts{'V'}) { $V = 1 ; $V = 1 }
-    if ($opts{'p'}) { $nPu_vs_nPy = $opts{'p'}} else {$nPu_vs_nPy = 3; $paramchangeflag = 1 } ;  #purine/pyramidine break ratio. e.g. 2 means twice so likely to break at a purine
-        (($nPu_vs_nPy =~ /^\d*\.?\d*$/) && ($nPu_vs_nPy >= 0 )) || die "\nERROR: Purine:Pyrimide break ratio parameter (-p) must be a number greater than 0\n";
-    if (defined $opts{'d'}) { $damweight = $opts{'d'}} else {$damweight = .3; $paramchangeflag = 1 } ;  #damage weight. probability of end nucleotide being deaminated
-        (($damweight =~ /^\d*\.?\d*$/) && ($damweight >= 0 ) && ($damweight <= 1 )) || die "\nERROR: Damage weight parameter (-d) must be a number from 0 to 1\n";
-    if ($opts{'D'}) { $damdecay = $opts{'D'}} else {$damdecay = .5; $paramchangeflag = 1 } ;  #damage weight. pribability of end nucleotide being deaminated
-        (($damdecay =~ /^\d*\.?\d*$/) && ($damdecay >= 0 )) || die "\nERROR: Damage weight parameter (-d) must be a number from 0 to one\n";
-    if ($opts{'X'}) { $dammode = 1} else {$dammode = 0; $paramchangeflag = 1 } ;  #are we in damage-only mode?
-    if ($opts{'r'}) { $frprop = $opts{'r'}} else {$frprop = .5; $paramchangeflag = 1 } ;  #forward/reverse (standard/reverse complement) ratio. accounts for disequilibrium between deamination patterns when strands are significantly different so that amplification bias occurs
- 	(($frprop =~ /^\d*\.?\d*$/) && ($frprop >= 0) && ($frprop <= 1)) || die "\nERROR: Plus/Minus parameter (-r) must be a number from 0 to one\n";
-    if ($opts{'b'}) { $baseline = $opts{'b'}} else {$baseline = .01; $paramchangeflag = 1 } ;  #forward/reverse (standard/reverse complement) ratio. accounts for disequilibrium between deamination patterns when strands are significantly different so that amplification bias occurs
- 	(($baseline =~ /^\d*\.?\d*$/) && ($baseline >= 0) && ($baseline <= $damweight)) || die "\nERROR: Deamination baseline parameter must be from 0 and the damage weight ($damweight).\n";
-    
-    #preamble when run
-    print STDERR "\nBeginning SimWreck with these parameters:\nInput file: $infile\nShape: $shape\n# reads: $ntot\nScale: $scale\nMin: $minlength\nMax: $maxlength\nBreakratio: $nPu_vs_nPy\nDamage weight: $damweight\nDamage decay: $damdecay\nDamage baseline: $baseline\nProportion plus strand: $frprop\n";
-    ($dammode) ? print STDERR "Mode: damage-only\n\n" : print STDERR "Mode: Standard\n\n" ;
-    $paramchangeflag && print STDERR "WARNING: Parameters altered or set automatically to default values.\n";
-    ( $nPu_vs_nPy < 1 ) && print STDERR "WARNING: Values of -p less than 1 don\'t make much biological sense.\n";
+my $illegalflag = 0; #bad argument?
+my $shortflag = 0; #short sequences present?
+my $paramchangeflag = 0; #have I set any params to default?
+my %opts;
 
+getopts('PVXhZi:n:s:S:m:M:p:d:D:r:b:u:a:',\%opts);
+($opts{'h'} && print STDERR $usage) && exit;
 
+#initialisations, explained below
+my $ntot;
+my $shape;
+my $scale;
+my $minlength;
+my $maxlength;
+my $pu_boost;
+my $damweight;
+my $damdecay;
+my $dammode;
+my $unifdammode;
+my $baseline;
+my $frprop;
+my $V = 0;
+my $VV = 0; #sneaky report var for working on this
+my $up;
+my $across;
+my $ncats = 1000000; #the number of increments in the randomisation hash. more is better + slower (but it's only calculated once)
 
-
-########################################### GUTS ###################################################
-    
-    my ($seqI_,$seqO_,$fq) = factory_factory($infile); #initiate bioperl factories for first pass
-
-    #first pass to get lengths
-    my $totlength = 0;
-    my $smallestlength;
-    my @lengths;
-    while (my $seq_ = $seqI_->next_seq)
-    {
-	if ($dammode)
-	{
-	    	if ($fq)
-		{
-			$seq_->seq(damage($seq_->seq,$damweight,$damdecay,$baseline,$V)); #damage the sequence
-			$seq_->display_id($seq_->display_id."_SimWreck");
-			$seqO_->write_seq($seq_);
-		}
-		else
-		{
-			$seqO_->write_seq(Bio::Seq->new(-seq => damage($seq_->seq,$damweight,$damdecay,$baseline,$V) , -display_id => $seq_->display_id."_SimWreck"))
-		}
-	    next; #if in damage mode, just deaminate the sequence and spit it back out
-	}
-	
-#	push @lengths , $seq_->length;
-
-	$totlength += $seq_->length;
-	if (! defined $smallestlength || $seq_->length < $smallestlength)
-	{
-	    $smallestlength = $seq_->length;
-	}
-    }
-    $dammode && (print STDERR "Program Completed\n") && exit;
-    
-    
-    ($maxlength > $smallestlength) && print STDERR "WARNING: Some contigs shorter than largest expected reads: expect possible excessive mostly-N reads from these contigs\n";
-    undef $seqI_;
-    ($seqI_,$seqO_,$fq) = factory_factory($infile); #reload factories for second pass
-   
-
-############################# LOOK SHARP, WE'RE IN CHARGE OF THE LENGTH DISTRIBUTION ##########################################################################################################################################################################################################################
-
-    my $nreads = 0; #counter
-
-    while (my $seq_ = $seqI_->next_seq) #per reference sequence
-    {
-	
-	#this 2-element array (if frprop not altered): ([n_reads_required_this_Sequence/2,forward sequence],[n_reads_required_this_Sequence/2,reverse comp sequence]). first element generates half the reads on the forward strand, second produces other half in reverse. f/r proportion altered by $frprop (set by default to .5)
-	for ( [ nint((($seq_->length)/$totlength) * $ntot*$frprop) , $seq_->seq , 0 ] , [ nint((($seq_->length)/$totlength) * $ntot*(1-$frprop)) , rc($seq_->seq) , 1 ] ) 
-	{
-	    my ($n,$seq,$rc) = @$_;
-	    #print STDERR "Demanding $n reads\n";
-	    my $realpu = 0;
-	    my $realpy = 0;
-	    my $repeathits = 0;
-	    my $nostart = 0;
-	    #$rc ? #print STDERR "We're making RC reads\n" : print "Making forward reads\n";
-	    
-	    my @quals;
-	    if($fq) 
-	    {
-		##print STDERR "Quals:\t\t\t" , (join "-" , @{$seq_->qual}) , "\n";
-		if ($rc) {@quals = reverse @{$seq_->qual}} #reverse qualities array if we're doing the minus strand
-		else {@quals = @{$seq_->qual}}
-		##print STDERR "becomes/remains:\t" , (join "-" , @quals) , "\n";
-	    }
-	    
-	    for (1..$maxlength) #add Ns and quality scores of 0 to facilitate the end-overlapping reads
-	    {
-		$seq .= 'N';
-		($fq) && push @quals , 0
-	    }
-	    #print "Quals, added:\t" , (join "-" , @quals) , "\n";
-	    
-	    
-	    my $seqlength = length $seq;
-	    ##print STDERR " lengths seq,qual:\n" , length $seq , "\n" , scalar @quals, "\n\n";	   
-
-	    ($seq =~ s/(?![AGCTagct])/N/) && ($illegalflag = 1); #change bad nucleotides and trigger warning
-
-	    #count purines and pyramidines
-	    my $nPu = $seq =~ tr/[AaGg]//;
-	    my $nPy = $seq =~ tr/[TtCc]//;
-
-	    #calculate how many reads should start at each
-	    my $nPu_breaks = nint((($nPu_vs_nPy*($nPu/$nPy))*$n)/(1+($nPu_vs_nPy*($nPu/$nPy))));
-	    my $nPy_breaks = $n - $nPu_breaks;
-	    
-	    #print STDERR "Total breaks added: " , $nPu_breaks+$nPy_breaks , "\n";
-
-	    #initialise and populate arrays of startpoints
-	    my @starts_pu;
-	    my @starts_py;
-	    for (1..$nPu_breaks)
-	    {
-		push @starts_pu , int(rand ($nPu))
-	    }
-	    for (1..$nPy_breaks)
-	    {
-		push @starts_py , int(rand ($nPy))
-	    }
-	    @starts_py = sort {$a <=> $b} @starts_py; @starts_pu = sort {$a <=> $b} @starts_pu;
-
-	    #we're going to place reads on the sequence, so we need to count pur/pyrimidines as we go
-	    my $pucount = -1; #set up counts, first hit will increment making this a sensible zero-based count
-	    my $pycount = -1;
-	    my @seqarray = split '' , $seq; #put seq in an array to make random access fast
-	    
-
-########## THAT'S ALL THE BACKGROUND WE NEED. MAKE THE READS ##############
-
-
-        for ( my $i = 0 ; $i <= $seqlength-$maxlength ; ++$i ) #scan the sequence itself
-	    {
-		#print STDERR "i: $i\nArrays: \n" , join ("-" , @starts_pu ), " == " ,  scalar @starts_pu , "\n" , join ("-" , @starts_py) ," == " ,  scalar @starts_py ,  "\n";
-		if ($seqarray[$i] =~ /[AaGg]/)
-		{
-		    ++$pucount;
-		    #print STDERR "$pucount th of $nPu purines\n";
-		    if ( (defined $starts_pu[0]) && ($pucount == $starts_pu[0])) #if there are still reads left to generate, and we had decided to start a read at this purine
-		    {
-			my $length = get_length($nPu_vs_nPy , $shape , $scale , $minlength , $maxlength , $V , [@seqarray[($i+1+$minlength) .. ($i+1+$maxlength)]]); #define the distribution over possible read lengths and draw from it
-			++$nreads;
-			
-			#set up id
-			my $id;
-			($seq_->display_id) ? ($id = $seq_->display_id) : ($id = 'NO_ID');
-			my $frag_ = makefrag($fq,$seq_,$i,$length,\@seqarray,$damweight,$damdecay,$baseline,$V,$id,$nreads,$rc,\@quals);
-			$seqO_->write_seq($frag_);
-			++$realpu;
-
-			if ((defined $starts_pu[1]) && ($starts_pu[0] == $starts_pu[1])) #check we might have another read starting here
-			{
-			    ++$repeathits;
-			    --$pucount;
-			    --$i;
-			}
-			shift @starts_pu; #that's it for this startpos, take it off the list.
-		    }
-		}
-		elsif ($seqarray[$i] =~ /[TtCc]/) #as above but for pyrimidines.
-		{
-		    ++$pycount;
-		    #print STDERR "$pycount th of $nPy purines\n";
-		    if ( (defined $starts_py[0]) && ($pycount == $starts_py[0]))
-		    {
-			my $length = get_length($nPu_vs_nPy , $shape , $scale , $minlength , $maxlength , $V , [@seqarray[($i+1+$minlength) .. ($i+1+$maxlength)]]);
-			++$nreads;
-			my $id;
-			($seq_->display_id) ? ($id = $seq_->display_id) : ($id = 'NO_ID');
-			my $frag_ = makefrag($fq,$seq_,$i,$length,\@seqarray,$damweight,$damdecay,$baseline,$V,$id,$nreads,$rc,\@quals);
-			$seqO_->write_seq($frag_);
-			++$realpy;
-
-			if ((defined $starts_py[1]) && ($starts_py[0] == $starts_py[1]))
-			{
-			    ++$repeathits;
-			    --$pycount;
-			    --$i;
-			}
-			shift @starts_py;
-		    }
-		}
-	    }
-	}
-    }
-    
-    $illegalflag && #print STDERR "WARNING: Non-AGTC nucleotides in at least one sequence changed to Ns.\n";
-    #print STDERR "Program completed\n";
-    
+if ($opts{'n'}) { $ntot = $opts{'n'}} else {$ntot = 10000; $paramchangeflag = 1 } ; #n reads desired
+    (($ntot =~ /^\d*\.?\d*$/) && ($ntot > 0)) || die "\nERROR: Desired reads (-n) must be a number greater than 0\n";
+if ($opts{'s'}) { $shape = $opts{'s'}} else {$shape = 4; $paramchangeflag = 1 } ; #shape param
+    (($shape =~ /^\d*\.?\d*$/) && ($shape > 0)) || die "\nERROR: Shape parameter (-s) must be a number greater than 0\n";
+if ($opts{'S'}) { $scale = $opts{'S'}} else {$scale = 8; $paramchangeflag = 1 } ; #scale param
+    (($scale =~ /^\d*\.?\d*$/) && ($scale > 0)) || die "\nERROR: Scale parameter (-S) must be a number greater than 0\n";
+if ($opts{'m'}) { $minlength = $opts{'m'}} else {$minlength = 25; $paramchangeflag = 1 } ; #Left end of beta distribution parameter
+    (($minlength =~ /^\d*\.?\d*$/) && ($minlength >= 0)) || die "\nERROR: Left end of beta distribution parameter (-m) must be a number greater than or equal to 0\n";
+if ($opts{'M'}) { $maxlength = $opts{'M'}} else {$maxlength = 150; $paramchangeflag = 1 } ; #Right end of beta distribution parameter
+    (($maxlength =~ /^\d*\.?\d*$/) && ($maxlength > $minlength)) || die "\nERROR: Right end of beta distribution parameter (-M) must be a number greater than 0 and greater than left end (-m)\n";
+if ($opts{'u'}) { $up = $opts{'u'}} else {$up = 45} ; #height of the ascii density plot in chars
+    (($up =~ /^\d*\.?\d*$/) && ($up > 5)) || die "\nERROR: Plot height (-u) must be a number greater than 4\n";
+if ($opts{'a'}) { $across = $opts{'a'}} else {$across = 120} ; #width of the ascii density plot in chars
+    (($across =~ /^\d*\.?\d*$/) && ($across > 5)) || die "\nERROR: Plot width (-u) must be a number greater than 4\n";
+if ($opts{'P'})
+{
+    plot_beta($shape,$scale,$minlength,$maxlength,$across,$up); #routine in this script
     exit;
-    
-    
-    
+}
+((my $infile = $opts{'i'}) && (-e $opts{'i'}) ) || (die "\nCheck input fasta file given with -i.\n"); #input file
+if ($opts{'V'}) { $V = 1 ; $V = 1 }
+if ($opts{'p'}) { $pu_boost = $opts{'p'}} else { $pu_boost = undef; $paramchangeflag = 1 } ;  #frequency boost given to purines at the ends of sequences
+    ((!$pu_boost) || (($pu_boost =~ /^\d*\.?\d*$/) && ($pu_boost >= 0 ))) || die "\nERROR: Purine:Pyrimide break ratio parameter (-p) must be a number greater than 0\n";
+if (defined $opts{'d'}) { $damweight = $opts{'d'}} else {$damweight = .3; $paramchangeflag = 1 } ;  #damage weight. probability of end nucleotide being deaminated
+    (($damweight =~ /^\d*\.?\d*$/) && ($damweight >= 0 ) && ($damweight <= 1 )) || die "\nERROR: Damage weight parameter (-d) must be a number from 0 to 1\n";
+if (defined $opts{'D'}) { $damdecay = $opts{'D'}} else {$damdecay = .5; $paramchangeflag = 1 } ;  #damage weight. pribability of end nucleotide being deaminated
+    (($damdecay =~ /^\d*\.?\d*$/) && ($damdecay >= 0 )) || die "\nERROR: Damage weight parameter (-d) must be a number from 0 to one\n";
+if ($opts{'X'}) { $dammode = 1} else {$dammode = 0; $paramchangeflag = 1 } ;  #are we in damage-only mode?
+if ($opts{'Z'}) { $unifdammode = 1} else {$unifdammode = 0; $paramchangeflag = 1 } ;  #are we in uniform damage-only mode?
+($dammode) && ($unifdammode) && die "Damage mode (-X) and uniform damage mode (-Z) are mutually exclusive: please choose one only\n";
+if ($opts{'r'}) { $frprop = $opts{'r'}} else {$frprop = .5; $paramchangeflag = 1 } ;  #forward/reverse (standard/reverse complement) ratio. accounts for disequilibrium between deamination patterns when strands are significantly different so that amplification bias occurs
+    (($frprop =~ /^\d*\.?\d*$/) && ($frprop >= 0) && ($frprop <= 1)) || die "\nERROR: Plus/Minus parameter (-r) must be a number from 0 to one\n";
+if ($opts{'b'}) { $baseline = $opts{'b'}} else {$baseline = .01; $paramchangeflag = 1 } ;  #forward/reverse (standard/reverse complement) ratio. accounts for disequilibrium between deamination patterns when strands are significantly different so that amplification bias occurs
+    (($baseline =~ /^\d*\.?\d*$/) && ($baseline >= 0) && ($baseline <= $damweight)) || die "\nERROR: Deamination baseline parameter must be from 0 and the damage weight ($damweight).\n";
 
-    
-    
-    
+#preamble when run
+print STDERR "\nBeginning SimWreck with these parameters:\nInput file: $infile\nNumber of reads: $ntot\nShape: $shape\nScale: $scale\nMin: $minlength\nMax: $maxlength\nDamage weight: $damweight\nDamage decay: $damdecay\nDamage baseline: $baseline\n";
+($pu_boost) && print STDERR "Purine End Boost: $pu_boost\n";
+if ($dammode){print STDERR "Mode: damage-only\n\n"}
+elsif ($unifdammode){print STDERR "Mode: Uniform damage\n\n"}
+else{print STDERR "Mode: Standard\n\n"};
+
+
+$paramchangeflag && print STDERR "WARNING: Parameters altered or set automatically to default values.\n";
+($pu_boost) && ( $pu_boost > .6 ) && print STDERR "WARNING: Values of -p near 1 probably don\'t make much biological sense.\n\n";
+
+
     ###########################################################################################################################################################################################################################################################################################
-    ############################################################################################################################################################################		SUBS		###############################################################################
+    ############################################################################################################################################################################		GUTS		###############################################################################
     ###########################################################################################################################################################################################################################################################################################
-    
-    #define and draw from probability distribution (discretised) 
-    sub get_length #####################################################################################################################################################################################################################################################################
-    {
-	my @scores;
-	my $totscore;
-	my ($nPu_vs_nPy,$shape,$scale,$minlength,$maxlength,$V) = @_[0..5];
-	@_ = @{$_[6]};
-	my $i = 0;
-	
-	my @cumscores; #cumulative distribution
-	foreach (@_)
-	{
-	    my $s = 0;
-	    if (($_) && ($_ =~ /[AaGg]/))
-	    {
-		$s = beta_pdf(((2*$i)+1)/(2*(scalar @_)) , $shape , $scale );
-	    }
-	    else #implicitly treats non-ag nucleotides as A/T.
-	    {
-		    $s = $nPu_vs_nPy*beta_pdf(((2*$i)+1)/(2*(scalar @_)) , $shape , $scale ); #multiply relative probability by bonus for being a pyramidine
-	    }
-	    push @scores , $s; #proportional densities over range represented by ordered elements of @scores
-	    $totscore += $s;
-	    push @cumscores, $totscore; #cululative equivalent
-	    ++$i
-	}
-	
-	my $decider = rand($totscore); #uniformly random number over range of cumulative dist
-	return binary_search([@cumscores],$decider)+$minlength+1; #find first score less than decider
-    }
-    
-    sub damage ############################################################################################################################################################################################################################################################################################
-    {
-
-	my ($seq,$damweight,$damdecay,$baseline,$V) = @_;
-
-	my $seqbuild; #add to this each time a nucleotide is passed
-	for ( my $i = 0 ; $i < length ($seq) ; ++$i ) #another pass over the sequence (UGH but necesary since we didn't know the length previously)
-	{
-	    if ((substr($seq,$i,1) eq 'C') && (rand 1 < ((($damweight-$baseline)*exp(-(($i)*$damdecay)))+$baseline))) #if decider (rand 1) is less than the chosen probability of this nucleotide being deaminated if this far from end, change it
-	    {
-		$seqbuild .= 'T';
-	    }
-	    elsif ((substr($seq,$i,1) eq 'G') && (rand 1 < (($damweight-$baseline)*exp(-(((length ($seq) - $i - 1))*$damdecay))+$baseline))) # as above, for G to A.
-	    {
-		$seqbuild .= 'A';
-	    }
-	    else #no change
-	    {
-		$seqbuild .= substr($seq,$i,1);
-	    }
-	}
-	$seqbuild;
-    }
 
 
-    #takes (shape,scale). gives a number proportional to density
-    sub beta_pdf #################################################################################################################################################################################################################################################################################
+
+
+($dammode || $unifdammode) || print STDERR "Initiatialising randomisation hash\n";
+($dammode || $unifdammode) || (my @lengthdist_randomiser = @{randomisation_array($ncats,[get_beta_dist($shape,$scale,$maxlength-$minlength + 1)])});
+print STDERR "Initiatialising damage probability array\n";
+
+my @damprobsarray = map {((exp(-($_*$damdecay)))*($damweight-$baseline))+$baseline} (0..$maxlength);
+
+
+
+open (IN, $infile) or die "Can't open $infile\n";
+my @aux = undef;
+my ($name, $seq, $qual);
+my ($n, $slen, $qlen) = (0, 0, 0);
+
+my $estsamp = 10000;
+####################################################################################################################################################################################
+($dammode || $unifdammode) ? (print STDERR "Damaging sequences\n") : (print STDERR "Making first pass of data\n"); ########################################################################################################################################
+####################################################################################################################################################################################
+#first pass to get lengths
+my $totlength;
+my $nseqs;
+my $smallestlength;
+my %seqinfo;
+my $mc_flag;
+my ($U,$Y); # count pUrines and pYramidines in case -p is set. Needs to be out here for scoping purposes.
+
+while (($name,$seq,$qual) = readfq(\*IN,\@aux))
+{
+    #print "go $name\n";
+    my $length = length $seq;
+    (($dammode) && ($length > scalar (@damprobsarray))) && (@damprobsarray = map {((exp(-($_*$damdecay)))*($damweight-$baseline))+$baseline} (0..$length));
+    ($dammode) && write_seq($name,damage(\@damprobsarray, \$seq , $length),$qual) && next; #beware: passing direct ref to $seq will alter it. Only safe if we never need to refer to the original again,
+    ($unifdammode) && write_seq($name,unif_dam(\$seq,$damweight),$qual) && next;
+    ++$nseqs;
+    ($nseqs < 11) ? (print STDERR "Scanning sequence $name\n") : (($nseqs == 11 && print STDERR " ... scanning more sequences ...\n") || (($nseqs % 100) || print STDERR "Scanning $nseqs","th sequence, $name\n"));
+    
+    $totlength += $length; #total length of all seqs
+    $seqinfo{$name}{'l'}=$length;
+    (! defined $smallestlength || $length < $smallestlength) && ($smallestlength = $length);
+    
+    if ($opts{'p'})
     {
-	(($_[0]**($_[1]-1))*(1-$_[0])**($_[2]-1))#/beta($_[1],$_[2]);
-    }
-    
-    #nearest integer
-    sub nint ##################################################################################################################################################################################################################################################################################
-    {
-	(($_[0] - int($_[0])) >= 0.5) ? return int($_[0]) + 1 : return int($_[0])
-    }
-    
-    #reverse complement
-    sub rc ##################################################################################################################################################################################################################################################################################
-    {
-       my ($seq, $V) = @_;
-       $V && #print STDERR "Returning rc from rc subroutine\n";
-       $seq =~ tr/ACGTNRYSWKMBDHV/TGCANYRSWMKVHDB/;
-       return join '' , reverse ( split '' , $seq);
-    }
-    
-    #print out the shape of the requested distribution
-    sub plot_beta ##################################################################################################################################################################################################################################################################################
-    {
-	my ($shape , $scale , $minlength , $maxlength , $displen_h , $displen_v) = @_;
-    
-	my @cols;
-	my @betas;
-	for ( 1 .. $displen_h )
-	{
-	    push @betas , beta_pdf(((2*$_)+1)/(2*$displen_h) , $shape , $scale ); # get the right beta function
-	}
-	my $max = max(@betas);
-	@betas = map {($_/$max)*$displen_v} @betas;
-	
-	for ( 0 .. $displen_h -1 )
-	{
-	    my $height = nint($betas[$_]);
-	    ($height =~ /^\d+$/) || ($height = 0);
-	    #print "Height: $height\n";
-	    my @thiscol = ('#') x $height;
-	    @thiscol = (@thiscol, (' ') x ($displen_v - $height) );
-	    push @cols , [@thiscol];
-	}
-    
-	for my $row (reverse(0 .. scalar @{$cols[0]}-1))
-	{
-	    print map {@$_[$row]} @cols;
-	    print "\n";
-	}
-    
-	my $midlength = ($maxlength - $minlength)/2 + $minlength;
-	my $gaps = (scalar @cols) - (length $maxlength) - (length $minlength) - (length $midlength);
-	my $gap1 = nint ($gaps/2);
-	my $gap2 = $gaps-$gap1;
-    
-	print '-' x scalar @cols;
-	print "\n$minlength" , ' ' x $gap1 , "$midlength" , ' ' x $gap2 , "$maxlength\n";
-    }
-    
-    #maximum
-    sub max #################################################################################################################################################################################################################################################################################
-    {
-	my $best = shift;
-	foreach (@_)
-	{
-	    ($_ > $best) && ($best = $_)
-	}
-	$best;
-    }
-    
-    #a take on the binary search. a recursive sub that looks for the first value below the target. if the lowest entry exceeds the target it just returns that value. if the upper value is below the target it returns that.
-    sub binary_search ##################################################################################################################################################################################################################################################################################
-    { # list must already be sorted!
-        my $tgt = $_[1];
-        my ($top,$bottom);
-        (!(ref $_[2]) || (scalar @{$_[2]} != 2)) ? (($top,$bottom) = ( (scalar @{$_[0]}) - 1 , 0 )) : (($bottom,$top) = ( $_[2][0] ,  $_[2][1] ));
-        my @array = @{$_[0]}[$bottom..$top];
-        my $l = $top - $bottom + 1;
-        my $up = int ($bottom + $l/2);
-        my $down = $up - 1;
-        my $upval = $_[0][$up];
-        my $downval = $_[0][$down];
-        if ($l == 1)
+        if ($seqinfo{$name}{'l'} <= ($estsamp*2)) # so short we may as well do a census
         {
-            if ($_[0][$bottom] < $tgt)
+            for my $i (0 .. $seqinfo{$name}{'l'} - 1 )
             {
-                return $up;
+                my $nt = substr($seq, $i , 1);
+                ($nt !~ /[AGCTagct]/) && next;
+                ($nt =~ /[AaGg]/) ? (++$U) : (++$Y);
             }
-            #return 'NA'; #correct answer for posterity
-	    return $down #pragmatic answer for charity
         }
-        ($downval > $tgt) && (return binary_search(@_[0..1],[$bottom,$down]));
-        ($upval < $tgt) && (return binary_search(@_[0..1],[$up,$top]));
-        ($upval == $tgt) &&  (return binary_search(@_[0..1],[$bottom,$down]));
-        return $down;
+        else #long sequence - estimate purine content from a sample
+        {
+            $mc_flag = 1;
+            for ( 1 .. $estsamp )
+            {
+                my $nt = substr($seq, rand $seqinfo{$name}{'l'} - 1 , 1);
+                next if $nt !~ /[AGCTagct]/;
+                ($nt =~ /[AaGg]/) ? (++$U) : (++$Y);
+            }
+        }
+        (( $U , $Y ) = ( $U/($U+$Y) , $Y/($U+$Y) ));
+        $seqinfo{$name}{'p'} = ($U*($pu_boost*$U+$pu_boost*$Y-$Y))/($Y*(-$U-$pu_boost*$U-$pu_boost*$Y));
+
+    }
+}
+($dammode || $unifdammode) && print STDERR "SimWreck run completed\n" && exit 0;
+$mc_flag && print STDERR "Purine/pyramidine frequencies for sequences longer than " , $estsamp*2 , " nt estimated using a sample of $estsamp random nucleotides\n";
+
+
+
+
+
+######################################################################################################################################################################################
+print STDERR "Making second pass over $nseqs reference sequences and generating reads\n\n"; ##########################################################################################
+######################################################################################################################################################################################
+
+
+#reload file for second pass
+open (IN, $infile); #reload reads
+
+
+
+my $nreads = 0;
+@aux = undef;
+while (my ($name,$seq,$qual) = readfq(\*IN,\@aux)) #looping over each given sequence, forward and rc ... sorry for the repeated code ...
+{
+    my $reads_this_seq_each_direction = nint($ntot*($seqinfo{$name}{'l'}/(2*$totlength))); #these few lines are where some rounding errors are coming in, I think owing to the factor of two
+    $nseqs < 10 && print STDERR "Processing sequence $name of length $seqinfo{$name}{'l'}, to generate " , $reads_this_seq_each_direction * 2 ," out of $ntot reads\n";
+    my $countdown = $reads_this_seq_each_direction;
+    while ( $countdown )
+    {
+        my ( $s , $l ) = ( int rand $seqinfo{$name}{'l'} , $minlength + $lengthdist_randomiser[rand $ncats] ); #$s(tart) and $l(ength)
+        my $oh = $s+$l-$seqinfo{$name}{'l'}; #length of part overshooting the end of the reference sequence (if any)
+        if ($opts{'p'}) 
+        {
+            if ( ((substr($seq,$s-1,1) =~ /[CcTt]/) && (rand() < $seqinfo{$name}{'p'})) || ((substr($seq,$s-1,1) =~ /[Nn-]/) && (rand() < $Y*$seqinfo{$name}{'p'})) ) {redo} #preceding = py or preceding = N (i.e. impose penalty to possibly retry this read. penalty for N includes probability it was a pY)
+            if (($oh <= 0) && (substr($seq,$s+$l,1) =~ /[AaGg]/) && (rand() < $seqinfo{$name}{'p'})) {redo} #following = pu (i.e. impose penalty and retry read)
+            if ((($oh > 0) || (substr($seq,$s+$l,1) =~ /[Nn-]/)) && (rand() < $U*$seqinfo{$name}{'p'})) {redo} #following = N by virtue of being off end of refseq, or just naturally
+        }
+        my $subseq = (($oh > 0) && (substr($seq,$s,$l)."N" x $oh)) || substr($seq,$s,$l);
+        ++$nreads; --$countdown;
+        damage(\@damprobsarray, \$subseq, $l);
+        write_seq($name."_simwreck_$nreads",$subseq,$qual && substr($qual,$s,$l));
     }
     
-    #return {'path' => path, 'ext' => extension , 'name' => everything in between} 
-    sub parse_filename ###########################################################################################################################################################################################################################################################################
+    ( $name , $seq ) = ( $name , rc ( $seq ) );
+    $qual &&= scalar reverse $qual;
+    
+    $countdown = $reads_this_seq_each_direction;
+    while ( $countdown )
     {
-        $_ = $_[0];
-        my $p = (/\//);
-        my $x = (/\./);
-        if($p && $x)
+        my ( $s , $l ) = ( int rand $seqinfo{$name}{'l'} , $minlength+$lengthdist_randomiser[rand $ncats] );
+        my $oh = $s+$l-$seqinfo{$name}{'l'}; #overhang
+        if ($opts{'p'})
         {
-                /(.*\/)([^\.]*)(\..*)/;
-                return { 'path' => $1 , 'name' => $2, 'ext' => $3 };
+            (substr($seq,$s-1,1) =~ /[CcTt]/) && (rand() < $seqinfo{$name}{'p'}) && redo; #preceding = py (i.e. impose penalty)
+            ($oh <= 0) && (substr($seq,$s+$l,1) =~ /[AaGg]/) && (rand() < $seqinfo{$name}{'p'}) && redo; #following = pu (i.e. impose penalty)
         }
-        elsif($p)
+        my $subseq = (($oh > 0) && (substr($seq,$s,$l)."N" x $oh)) || substr($seq,$s,$l);
+        ++$nreads; --$countdown;
+        damage(\@damprobsarray, \$subseq, $l);
+        write_seq($name."_rc_simwreck_$nreads",$subseq,$qual && substr($qual,$s,$l));
+    }
+}
+
+
+
+################################################################################################################################################################################################
+print STDERR "SimWreck run completed\n"; #######################################################################################################################################################
+################################################################################################################################################################################################
+
+
+
+
+
+exit 0;
+
+
+
+
+
+    
+#################################################################################################################################################################################################
+####################################################################################		SUBS		#################################################################################
+#################################################################################################################################################################################################
+    
+sub unif_dam
+{
+    my ( $seqref , $d ) = @_;
+    my $buildseq = '';
+    for (0 .. length ($$seqref) - 1)
+    {
+        $_ = substr( $$seqref , $_ , 1 );
+        if (/[Gg]/ && (rand() < $d)) { $buildseq .= 'A' }
+        elsif ( /[Cc]/ && (rand() < $d)) { $buildseq .= 'T' }
+        else { $buildseq .= uc $_ };
+    }
+    $buildseq;
+}
+    
+sub write_seq #### (name,seq,qual) ### if no qual given, assumes fasta format #################################################3
+{
+    $_[2] ? (print "\@$_[0]\n$_[1]\n+\n$_[2]\n") : (print ">$_[0]\n$_[1]\n");
+}
+
+#can probably be further simplified ... every legal combo, just decide where the ds_min bit is going to sit, then deal with the rest?
+sub damage ############### apply deamination-like damage to string ###########################################
+{
+    my ($damprobsref,$seqref,$l) = @_;
+	my $ds_min = 2; #minimum length of ds region. a bit arbitrary, taken after briggs et al 2007
+	#initialise legal mutation variables
+    my @commands;
+    #print "Damaging:\t$$seqref\n";
+    for (my ($i,$firstG,$notG)=(0,0,0) ; $i < $l ; ++$i )
+    {
+        #print "New loop\n";
+        --$notG;
+        #print "NotG: $notG\n";
+        #print "FirstG: $firstG\n";
+        my $nt = substr($$seqref,$i,1);
+        #print "Pos $i:\t$nt\n";
+        #print "\tFrom left = $i\n\tFrom right = " , $l - $i - 1 , "\n";
+        #print "Left dprob:  $damprobsref->[$i]; Right: $damprobsref->[$l - $i - 1]\n" , "Rands: " , rand 1 , " " , rand , " " , rand() , "\n";
+        if ((substr($$seqref,$i,1) =~ /[Cc]/) && ($damprobsref->[$i] > rand))
         {
-                /(.*\/)(.*)/;
-                return { 'path' => $1 , 'name' => $2 , 'ext' => '' };
+            #print "Mutating C!\n";
+            $firstG && (($i,$firstG,$notG,@commands)=(0,0,0)) && redo; #reset all counters so as to run once more from top
+            push @commands , "substr(\$\$seqref,$i,1) = \'T\'";
+            $notG = 2; #no deaminations on opposite strand will reach sequence for coming two nt
         }
-        elsif($x)
+        elsif ((substr($$seqref,$i,1) =~ /[Gg]/) && ($damprobsref->[$l - $i - 1] > rand))
         {
-                /([^\.]*)(\..*)/;
-                return { 'path' => '' , 'name' => $1 , 'ext' => $2 };
+           #print "Mutating G!\n";
+            ($notG < 0) || (($i,$firstG,$notG,@commands)=(0,0,0)) && redo;
+            $firstG = 1;
+            push @commands , "substr(\$\$seqref,$i,1) = \'A\'";
         }
-        else
+        #print "Cmds so far: @commands\n";
+    }
+    #print "Exit loop with string $$seqref and commands: @commands\n"; exit;
+    map {eval} @commands; #these commands lead to a legit mutation set ... execute them all. with realistic parameters this will happen the first time in almost all cases
+    $$seqref;
+}
+
+sub randomisation_array #set up a hash to effectively randomise from a discrete distribution #####################################################################################
+{
+    my $ncategories = shift;
+    my @dist = @{shift;};
+    my $sum = sum(@dist);
+    my @array;
+    my $n = 0;
+    my $x = -1;
+    my $blockleft = 0;
+    foreach (@dist)
+    {
+        ++$x;
+        $blockleft += ($_/$sum*$ncategories);
+        while ($blockleft >= 1)
         {
-                return { 'path' => '' , 'name' => $_ , 'ext' => '' };
+            $array[$n] = $x; 
+            ++$n;
+            --$blockleft;
         }
     }
- #set up bioperl factories 
-sub factory_factory ######################################################################################################################################################################################################################################################################################################################################################################################################################################################################
-{    
-    my %fn = %{parse_filename(shift)};
-    my $fq = 0; #flag if it's a fastq
-    my $seqI_;
-    my $seqO_;
-    if ($fn{'ext'} =~ /fastq$|fq$/)
+    ($array[$n]) || ($array[$n] = $x);
+    \@array;
+}
+
+sub draw_from_cumdist #give it n draws required, and the cumulative distribution (an array ref; ordered categories are the indicies, counts/frequencies are the entries i.e. a uniform dist could be [1,2,3,4,5,6])
+{
+    my @d = @{pop;};
+    my @draws;
+    my $max = $d[(scalar @d) - 1];
+    for (1..$_[0])
     {
-	$fq = 1;
-	$seqI_ = Bio::SeqIO->new(-file => $infile , -format => 'fastq');
-    	$seqO_ = Bio::SeqIO->new(-fh => \*STDOUT , -format => 'fastq');
+        return binary_search(\@d,rand $max);
+    } 
+}
+
+#define beta probability distribution (unnormalised 'cos why bother?)
+sub get_beta_dist #####################################################################################################################################################################################################################################################################
+{
+    my @dist;
+    my ($shape,$scale,$range) = @_;
+    foreach (0..$range)
+    {
+	push @dist , beta_pdf( $_/$range , $shape , $scale );
     }
-    elsif ($fn{'ext'} =~ /fastq\.gz$|fq\.gz$/)
+    @dist;
+}
+
+#takes (shape,scale). gives a number proportional to density
+sub beta_pdf #################################################################################################################################################################################################################################################################################
+{
+    (($_[0]**($_[1]-1))*(1-$_[0])**($_[2]-1))#/beta($_[1],$_[2]);
+}
+
+#nearest integer
+sub nint ##################################################################################################################################################################################################################################################################################
+{
+    (($_[0] - int($_[0])) >= 0.5) ? return int($_[0]) + 1 : return int($_[0])
+}
+
+sub floor ##################################################################################################################################################################################################################################################################################
+{
+    $_[0] =~ s/(\d*)\.*\d*//;
+    return $1;
+}
+
+
+#reverse complement
+sub rc ##################################################################################################################################################################################################################################################################################
+{
+   my ($seq) = @_;
+   $seq =~ tr/ACGTNRYSWKMBDHVacgtnryswkmbdhv/TGCANYRSWMKVHDBtgcanyrswmkvhdb/;
+   return scalar reverse $seq;
+}
+
+#print out the shape of the requested distribution
+sub plot_beta ##################################################################################################################################################################################################################################################################################
+{
+    my ($shape , $scale , $minlength , $maxlength , $displen_h , $displen_v) = @_;
+
+    my @cols;
+    my @betas;
+    for ( 1 .. $displen_h )
     {
-	$fq = 1;
-	close IN;
-	open(IN,"gzip -cd $infile |");
-	$seqI_ = Bio::SeqIO->new(-fh => \*IN , -format => 'fastq');
-	$seqO_ = Bio::SeqIO->new(-fh => \*STDOUT , -format => 'fastq');
+	push @betas , beta_pdf(((2*$_)+1)/(2*$displen_h) , $shape , $scale ); # get the right beta function
     }
-    elsif ($fn{'ext'} =~ /fasta$|fa$/)
+    my $max = max(@betas);
+    @betas = map {($_/$max)*$displen_v} @betas;
+    
+    for ( 0 .. $displen_h -1 )
     {
-	$seqI_ = Bio::SeqIO->new(-file => $infile , -format => 'fasta');
-	$seqO_ = Bio::SeqIO->new(-fh => \*STDOUT , -format => 'fasta');
+	my $height = nint($betas[$_]);
+	($height =~ /^\d+$/) || ($height = 0);
+	#print "Height: $height\n";
+	my @thiscol = ('#') x $height;
+	@thiscol = (@thiscol, (' ') x ($displen_v - $height) );
+	push @cols , [@thiscol];
+    }
+
+    for my $row (reverse(0 .. scalar @{$cols[0]}-1))
+    {
+	print map {@$_[$row]} @cols;
+	print "\n";
+    }
+
+    my $midlength = ($maxlength - $minlength)/2 + $minlength;
+    my $gaps = (scalar @cols) - (length $maxlength) - (length $minlength) - (length $midlength);
+    my $gap1 = nint ($gaps/2);
+    my $gap2 = $gaps-$gap1;
+
+    print '-' x scalar @cols;
+    print "\n$minlength" , ' ' x $gap1 , "$midlength" , ' ' x $gap2 , "$maxlength\n";
+}
+
+#maximum
+sub max #################################################################################################################################################################################################################################################################################
+{
+    my $best = shift;
+    foreach (@_)
+    {
+	($_ > $best) && ($best = $_)
+    }
+    $best;
+}
+
+#minimum
+sub min #################################################################################################################################################################################################################################################################################
+{
+    my $best = shift;
+    foreach (@_)
+    {
+	($_ < $best) && ($best = $_)
+    }
+    $best;
+}
+
+#sum
+sub sum
+{
+    eval eval join '+' , @_;
+}
+
+
+#a take on the binary search. a recursive sub that looks for the first value above the target. returns a zero-based position number in the array. if the lowest entry exceeds the target it just returns 0, the first entry. if the upper value is below the target it returns that.
+sub binary_search ##################################################################################################################################################################################################################################################################################
+{ # list must already be sorted!
+    my $tgt = $_[1];
+    my ($top,$bottom);
+    (!(ref $_[2]) || (scalar @{$_[2]} != 2)) ? (($top,$bottom) = ( (scalar @{$_[0]}) - 1 , 0 )) : (($bottom,$top) = ( $_[2][0] ,  $_[2][1] ));
+    my @array = @{$_[0]}[$bottom..$top];
+    my $l = $top - $bottom + 1;
+    my $up = int ($bottom + $l/2);
+    my $down = $up - 1;
+    my $upval = $_[0][$up];
+    my $downval = $_[0][$down];
+    #print "top: $top\nbottom: $bottom\nup: $up\ndown: $down\nupval: $upval\ndownval: $downval\nlength: $l\narray: @array\ntgt: $tgt\n\n";
+    ($l == 1) && (return $up);
+    ($downval > $tgt) && (return binary_search(@_[0..1],[$bottom,$down]));
+    ($upval < $tgt) && (return binary_search(@_[0..1],[$up,$top]));
+    ($upval == $tgt) &&  (return binary_search(@_[0..1],[$bottom,$down]));
+    return $up;
+}
+
+#return {'path' => path, 'ext' => extension , 'name' => everything in between} 
+sub parse_filename ###########################################################################################################################################################################################################################################################################
+{
+    $_ = $_[0];
+    my $p = (/\//);
+    my $x = (/\./);
+    if($p && $x)
+    {
+	    /(.*\/)([^\.]*)(\..*)/;
+	    return { 'path' => $1 , 'name' => $2, 'ext' => $3 };
+    }
+    elsif($p)
+    {
+	    /(.*\/)(.*)/;
+	    return { 'path' => $1 , 'name' => $2 , 'ext' => '' };
+    }
+    elsif($x)
+    {
+	    /([^\.]*)(\..*)/;
+	    return { 'path' => '' , 'name' => $1 , 'ext' => $2 };
     }
     else
     {
-	die "Could not recognise file extension \"$fn{'ext'}\" from input file\n";
+	    return { 'path' => '' , 'name' => $_ , 'ext' => '' };
     }
-	return ($seqI_,$seqO_,$fq);
-}
-    
-#make a bioperl sequence object as appropriate
-sub makefrag ####################################################################################################################################################################################################################################################################################################################################################################################################################################################################################################################################################
-{	
-	my ($fq,$seq_,$i,$length,$saref,$damweight,$damdecay,$baseline,$V,$id,$nreads,$rc,$qref) = @_;
-	my $frag_;
-	my @seqarray = @$saref;
-	my @quals;
-	($fq) && (@quals = @$qref);
-    ($rc) ? ($rc = '_rc') : ($rc = '');
-	if ($fq)
-	{
-		$frag_ = Bio::Seq::Quality->new
-		(     
-			-qual => [@quals[($i+1)..($i+$length)]],
-                     	-seq =>  damage(join('',@seqarray[($i+1)..($i+$length)]),$damweight,$damdecay,$baseline,$V), #feed subsection of seq array representing read into damage (deamination) sub, plug result into bioseq output object -seq
-                      	-id  => $id."_SimWreck_".$nreads."_".($i+1).$rc
-                );
-	}
-	else
-	{
-		$frag_ = Bio::Seq->new
-		(
-			-seq => damage(join('',@seqarray[($i+1)..($i+$length)]),$damweight,$damdecay,$baseline,$V),
-			-display_id => $id."_SimWreck_".$nreads."_".($i+1).$rc
-		);
-	}
-	$frag_;
 }
 
 
-
-
-
-		        __END__
+############## fastq parser, thanks to Heng Li ############################################################################################################################################################
+sub readfq {
+	my ($fh, $aux) = @_;
+	$aux = [undef, 0] if (!defined($aux));
+	return if ($aux->[1]);
+	if (!defined($aux->[0])) {
+		while (<$fh>) {
+			chomp;
+			if (substr($_, 0, 1) eq '>' || substr($_, 0, 1) eq '@') {
+				$aux->[0] = $_;
+				last;
+			}
+		}
+		if (!defined($aux->[0])) {
+			$aux->[1] = 1;
+			return;
+		}
+	}
+	my $name = /^.(\S+)/? $1 : '';
+	my $seq = '';
+	my $c;
+	$aux->[0] = undef;
+	while (<$fh>) {
+		chomp;
+		$c = substr($_, 0, 1);
+		last if ($c eq '>' || $c eq '@' || $c eq '+');
+		$seq .= $_;
+	}
+	$aux->[0] = $_;
+	$aux->[1] = 1 if (!defined($aux->[0]));
+	return ($name, $seq) if ($c ne '+');
+	my $qual = '';
+	while (<$fh>) {
+		chomp;
+		$qual .= $_;
+		if (length($qual) >= length($seq)) {
+			$aux->[0] = undef;
+			return ($name, $seq, $qual);
+		}
+	}
+	$aux->[1] = 1;
+	return ($name, $seq);
+}
